@@ -1,1 +1,5 @@
 stockfish
+.superpowers/
+.env
+backend.exe
+docs/superpowers/
