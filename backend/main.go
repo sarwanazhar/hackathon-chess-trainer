@@ -37,6 +37,10 @@ func main() {
 		HandleGame(c, userID)
 	})
 
+	// Public auth routes — no JWT required.
+	r.POST("/auth/register", HandleRegister)
+	r.POST("/auth/login", HandleLogin)
+
 	// REST — auth via Authorization: Bearer <jwt> header.
 	api := r.Group("/api", authMiddleware())
 	api.POST("/chat", HandleChat)

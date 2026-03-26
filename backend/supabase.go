@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type SupabaseClient struct {
@@ -28,26 +26,36 @@ func NewSupabaseClient() *SupabaseClient {
 	}
 }
 
-// VerifyJWT validates a Supabase JWT (HS256) and returns the user_id (sub claim).
+// VerifyJWT validates a Supabase JWT by calling the Supabase auth API.
+// This works with both legacy HS256 and the newer ECC P-256 signing keys.
 func (s *SupabaseClient) VerifyJWT(tokenStr string) (string, error) {
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(s.JWTSecret), nil
-	})
-	if err != nil || !token.Valid {
-		return "", fmt.Errorf("invalid token: %w", err)
+	req, err := http.NewRequest("GET", s.URL+"/auth/v1/user", nil)
+	if err != nil {
+		return "", err
 	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", fmt.Errorf("invalid claims")
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	req.Header.Set("apikey", s.ServiceKey)
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return "", err
 	}
-	sub, ok := claims["sub"].(string)
-	if !ok || sub == "" {
-		return "", fmt.Errorf("missing sub claim")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("invalid token (status %d)", resp.StatusCode)
 	}
-	return sub, nil
+
+	var user struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", err
+	}
+	if user.ID == "" {
+		return "", fmt.Errorf("missing user id in auth response")
+	}
+	return user.ID, nil
 }
 
 // dbRequest makes an authenticated request to the Supabase PostgREST API.
