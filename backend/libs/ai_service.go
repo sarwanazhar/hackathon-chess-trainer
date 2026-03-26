@@ -110,6 +110,63 @@ You are a blunt Grandmaster Coach.
 	return nil
 }
 
+// HandleChatWebSocketConnection handles the chat WebSocket connection
+func (ai *AIService) HandleChatWebSocketConnection(ws *websocket.Conn) error {
+	defer ws.Close()
+
+	for {
+		_, msg, err := ws.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("WebSocket read error: %w", err)
+		}
+
+		userMessage := strings.TrimSpace(string(msg))
+
+		// Generate chat response
+		if err := ai.GenerateChatResponse(context.Background(), userMessage, ws); err != nil {
+			log.Printf("Failed to generate chat response: %v", err)
+			ws.WriteMessage(websocket.TextMessage, []byte("CHAT_ERROR|Failed to generate response"))
+			continue
+		}
+	}
+}
+
+// GenerateChatResponse generates a chat response for the user message
+func (ai *AIService) GenerateChatResponse(ctx context.Context, userMessage string, ws *websocket.Conn) error {
+	// The prompt for chat
+	prompt := fmt.Sprintf(`You are a friendly and knowledgeable chess AI assistant. 
+		Answer the user's question about chess in a helpful and engaging way.
+		
+		User message: "%s"
+		
+		Please provide a clear, concise, and informative response.`, userMessage)
+
+	log.Printf("Generating chat response for: %s", userMessage)
+
+	streamCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	iter := ai.model.GenerateContentStream(streamCtx, genai.Text(prompt))
+	for {
+		resp, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to generate content: %w", err)
+		}
+
+		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+			for _, part := range resp.Candidates[0].Content.Parts {
+				chunk := fmt.Sprintf("%v", part)
+				ws.WriteMessage(websocket.TextMessage, []byte("CHAT_CHUNK|"+chunk))
+			}
+		}
+	}
+
+	return nil
+}
+
 // HandleWebSocketConnection handles the main WebSocket game loop
 func (ai *AIService) HandleWebSocketConnection(
 	ws *websocket.Conn,

@@ -10,4 +10,7 @@ import (
 func SetupRoutes(r *gin.Engine) {
 	// Game routes
 	r.GET("/game", controllers.GameHandler)
+
+	// Chat routes
+	r.GET("/chat", controllers.ChatHandler)
 }
