@@ -1,7 +1,7 @@
 # Chess Trainer — Backend API Documentation
 
 > **For the Next.js frontend team.** Base URL: `http://localhost:8080`
-> Auth provider: **Clerk**. Every request needs a Clerk JWT — details below.
+> Auth: **Clerk** JWTs. The backend uses `clerk-sdk-go/v2` — it validates your Clerk session tokens directly. No Supabase auth involved.
 
 ---
 
@@ -122,14 +122,14 @@ Change the AI coach's communication style. Persisted for the session.
 
 | Field | Type | Values |
 |-------|------|--------|
-| `mode` | string | `"mentor"` (default, supportive) \| `"roast"` (savage but accurate) |
+| `mode` | string | `"mentor"` (default, supportive Grandmaster) \| `"roast"` (savage but accurate) |
 
 No response message — takes effect on the next coaching message.
 
 ---
 
 #### `set_level`
-Adjust the coaching depth/vocabulary for the user's skill level.
+Adjust coaching depth and vocabulary for the user's skill level.
 
 ```json
 {
@@ -141,6 +141,8 @@ Adjust the coaching depth/vocabulary for the user's skill level.
 | Field | Type | Values |
 |-------|------|--------|
 | `level` | string | `"beginner"` \| `"intermediate"` \| `"advanced"` |
+
+No response message — takes effect on the next coaching message.
 
 ---
 
@@ -250,7 +252,7 @@ Sent when an operation fails (invalid move, no game started, etc.).
 ---
 
 #### `debug_prompt`
-Transparency feature — the exact prompt sent to the AI, before each coaching stream.
+Transparency feature — the exact grounded prompt sent to Gemini, emitted before each coaching stream starts.
 
 ```json
 {
@@ -259,7 +261,7 @@ Transparency feature — the exact prompt sent to the AI, before each coaching s
 }
 ```
 
-You can ignore this or display it in a debug panel.
+Safe to ignore in production UI. Useful for a debug panel during development.
 
 ---
 
@@ -920,10 +922,34 @@ For production, change this to your deployed backend URL.
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/ws/game?token=<jwt>` | WS | query param | Real-time game + AI coaching |
-| `/api/chat` | POST | Bearer | Streaming chess Q&A |
-| `/api/analyze` | POST | Bearer | Full game analysis |
-| `/api/puzzles` | GET | Bearer | Get puzzle queue |
-| `/api/puzzles/attempt` | POST | Bearer | Submit puzzle move |
-| `/api/puzzles/coach` | POST | Bearer | Engine coaching for wrong move |
-| `/api/puzzles/complete` | POST | Bearer | Record puzzle result (SRS) |
-| `/api/learn` | GET | Bearer | Topic learning + YouTube videos |
+| `/api/chat` | POST | Bearer | Streaming chess Q&A (SSE) |
+| `/api/analyze` | POST | Bearer | Full game analysis (game_id or PGN) |
+| `/api/puzzles` | GET | Bearer | Get personalized puzzle queue |
+| `/api/puzzles/attempt` | POST | Bearer | Submit a puzzle move |
+| `/api/puzzles/coach` | POST | Bearer | Engine coaching for a wrong move (no LLM) |
+| `/api/puzzles/complete` | POST | Bearer | Record puzzle result + schedule next review |
+| `/api/learn` | GET | Bearer | Topic learning content + YouTube videos |
+
+### WebSocket messages at a glance
+
+**Client → Server**
+
+| `type` | Key fields | Effect |
+|--------|-----------|--------|
+| `new_game` | `color` | Start a new game |
+| `move` | `move` (UCI) | Play a move |
+| `hint` | — | Get best move suggestion |
+| `set_personality` | `mode` (`mentor`/`roast`) | Change coaching tone |
+| `set_level` | `level` (`beginner`/`intermediate`/`advanced`) | Change coaching depth |
+
+**Server → Client**
+
+| `type` | Key fields | When |
+|--------|-----------|------|
+| `board_update` | `fen`, `ai_move` (UCI), `eval`, `opening` | After new_game or move |
+| `coach_chunk` | `text`, `is_blunder` | Streaming coaching (multiple) |
+| `coach_done` | — | Coaching stream finished |
+| `hint` | `move` (UCI), `eval`, `reason` | Response to hint request |
+| `game_over` | `result`, `winner` | Game ended |
+| `error` | `message` | Invalid move or server error |
+| `debug_prompt` | `prompt` | Grounded prompt sent to Gemini |

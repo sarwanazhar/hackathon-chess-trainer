@@ -3,7 +3,7 @@
 
 -- Profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
-    user_id     UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id     TEXT PRIMARY KEY,  -- Clerk user ID (e.g. user_2abc...)
     username    TEXT,
     rating      INT DEFAULT 800,
     personality TEXT DEFAULT 'mentor',
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 -- Games
 CREATE TABLE IF NOT EXISTS public.games (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL,      -- Clerk user ID
     pgn        TEXT,
     moves      TEXT[],
     result     TEXT,
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS public.games (
 -- Missed moves (source of personal puzzles)
 CREATE TABLE IF NOT EXISTS public.missed_moves (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id        UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id        TEXT NOT NULL,  -- Clerk user ID
     game_id        UUID REFERENCES public.games(id) ON DELETE SET NULL,
     fen            TEXT NOT NULL,
     user_move      TEXT,
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS public.missed_moves (
 -- Puzzles (user_id NULL = general pool)
 CREATE TABLE IF NOT EXISTS public.puzzles (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id    TEXT,               -- Clerk user ID, NULL = general pool
     fen        TEXT NOT NULL,
     solution   TEXT[] NOT NULL,
     theme      TEXT,
@@ -72,11 +72,8 @@ ALTER TABLE public.missed_moves ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.puzzles     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.videos      ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies: users can only see their own data
-CREATE POLICY "profiles_own" ON public.profiles    USING (auth.uid() = user_id);
-CREATE POLICY "games_own"    ON public.games       USING (auth.uid() = user_id);
-CREATE POLICY "missed_own"   ON public.missed_moves USING (auth.uid() = user_id);
-CREATE POLICY "puzzles_own"  ON public.puzzles     USING (auth.uid() = user_id OR user_id IS NULL);
+-- Note: user_id is now a Clerk TEXT ID — auth.uid() RLS policies removed.
+-- All data access goes through the backend service role (bypasses RLS).
 
 -- Service role bypasses RLS (used by the backend service key)
 CREATE POLICY "profiles_service" ON public.profiles    TO service_role USING (true) WITH CHECK (true);

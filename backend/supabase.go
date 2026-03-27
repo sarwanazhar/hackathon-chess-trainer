@@ -159,3 +159,15 @@ func (s *SupabaseClient) GetUserPersonality(userID string) (string, error) {
 	}
 	return result[0].Personality, nil
 }
+
+// UpsertProfile creates or updates the profile row for a Clerk user.
+// Safe to call on every login — does nothing if the profile already exists.
+func (s *SupabaseClient) UpsertProfile(userID, username string) error {
+	body := map[string]interface{}{
+		"user_id":     userID,
+		"username":    username,
+		"personality": "mentor",
+	}
+	_, err := s.dbRequestWithPrefer("POST", "profiles", body, "", "resolution=ignore-duplicates")
+	return err
+}
