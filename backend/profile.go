@@ -25,3 +25,15 @@ func HandleSyncProfile(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"user_id": userID, "username": req.Username})
 }
+
+// HandleGetProfile — GET /api/profile
+// Returns the user's profile (rating, personality, username).
+func HandleGetProfile(c *gin.Context) {
+	userID := c.GetString("user_id")
+	profile, err := sb.GetProfile(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
+		return
+	}
+	c.JSON(http.StatusOK, profile)
+}

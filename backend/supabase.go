@@ -183,3 +183,25 @@ func (s *SupabaseClient) UpsertProfile(userID, username string) error {
 	_, err := s.dbRequestWithPrefer("POST", "profiles", body, "", "resolution=ignore-duplicates")
 	return err
 }
+
+// Profile represents a user's profile row.
+type Profile struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	Rating      int    `json:"rating"`
+	Personality string `json:"personality"`
+}
+
+// GetProfile fetches the full profile for a user.
+func (s *SupabaseClient) GetProfile(userID string) (*Profile, error) {
+	data, err := s.dbRequest("GET", "profiles", nil,
+		"user_id=eq."+userID+"&select=user_id,username,rating,personality")
+	if err != nil {
+		return nil, err
+	}
+	var result []Profile
+	if err := json.Unmarshal(data, &result); err != nil || len(result) == 0 {
+		return nil, fmt.Errorf("profile not found for user %s", userID)
+	}
+	return &result[0], nil
+}

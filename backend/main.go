@@ -56,6 +56,7 @@ func main() {
 	// REST — auth via Authorization: Bearer <jwt> header.
 	api := r.Group("/api", authMiddleware())
 	api.POST("/profile", HandleSyncProfile)
+	api.GET("/profile", HandleGetProfile)
 	api.POST("/chat", HandleChat)
 	api.POST("/analyze", HandleAnalyze)
 	api.GET("/puzzles", HandleGetPuzzles)
