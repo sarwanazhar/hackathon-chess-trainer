@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/notnil/chess"
-	"github.com/notnil/chess/uci"
 )
 
 // --- Request / Response types ---
@@ -149,17 +147,13 @@ func HandlePuzzleCoach(c *gin.Context) {
 	}
 	game := chess.NewGame(posOpt)
 
-	stockfishPath := os.Getenv("STOCKFISH_PATH")
-	if stockfishPath == "" {
-		stockfishPath = "./stockfish/stockfish-windows-x86-64-avx2.exe"
-	}
-	eng, err := uci.New(stockfishPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "stockfish init failed"})
+	puzzleEngMu.Lock()
+	defer puzzleEngMu.Unlock()
+	eng := puzzleEng
+	if eng == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "stockfish not available"})
 		return
 	}
-	defer eng.Close()
-	eng.Run(uci.CmdUCI, uci.CmdIsReady)
 
 	// Analysis at current position (before any move).
 	beforeAnalysis := GetAnalysis(eng, game, 12)

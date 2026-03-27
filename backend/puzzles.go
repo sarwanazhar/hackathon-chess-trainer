@@ -88,7 +88,9 @@ type CompleteRequest struct {
 	TimeTakenMS int    `json:"time_taken_ms"`
 }
 
-// HandlePuzzleComplete records a puzzle attempt and updates next_review_at.
+// HandlePuzzleComplete records a puzzle attempt and schedules the next review.
+// Intervals grow with each successful solve: 1d → 3d → 7d → 14d → 30d.
+// A failed attempt always schedules a 24-hour retry.
 func HandlePuzzleComplete(c *gin.Context) {
 	var req CompleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -96,19 +98,48 @@ func HandlePuzzleComplete(c *gin.Context) {
 		return
 	}
 
-	nextReview := time.Now().Add(24 * time.Hour) // failed → review tomorrow
-	if req.Solved {
-		nextReview = time.Now().Add(7 * 24 * time.Hour) // solved → review in 7 days
+	// Fetch current attempt count for interval calculation.
+	var attemptCount int
+	data, err := sb.dbRequest("GET", "missed_moves", nil,
+		"id=eq."+req.PuzzleID+"&select=attempt_count")
+	if err == nil {
+		var rows []struct {
+			AttemptCount int `json:"attempt_count"`
+		}
+		if json.Unmarshal(data, &rows) == nil && len(rows) > 0 {
+			attemptCount = rows[0].AttemptCount
+		}
 	}
 
-	_, err := sb.dbRequest("PATCH", "missed_moves",
-		map[string]interface{}{"next_review_at": nextReview.Format(time.RFC3339)},
-		"id=eq."+req.PuzzleID,
-	)
+	srsIntervals := []time.Duration{
+		1 * 24 * time.Hour,
+		3 * 24 * time.Hour,
+		7 * 24 * time.Hour,
+		14 * 24 * time.Hour,
+		30 * 24 * time.Hour,
+	}
+
+	var nextReview time.Time
+	if !req.Solved {
+		nextReview = time.Now().Add(24 * time.Hour)
+	} else {
+		idx := attemptCount
+		if idx >= len(srsIntervals) {
+			idx = len(srsIntervals) - 1
+		}
+		nextReview = time.Now().Add(srsIntervals[idx])
+	}
+
+	updates := map[string]interface{}{
+		"next_review_at": nextReview.Format(time.RFC3339),
+		"attempt_count":  attemptCount + 1,
+	}
+
+	_, err = sb.dbRequest("PATCH", "missed_moves", updates, "id=eq."+req.PuzzleID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB update failed"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "next_review": nextReview.Format(time.RFC3339)})
 }
