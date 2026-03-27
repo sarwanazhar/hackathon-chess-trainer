@@ -158,7 +158,12 @@ func HandleGame(c *gin.Context, userID string) {
 			if gameID, err := sb.SaveGame(GameRecord{UserID: userID, Color: msg.Color}); err == nil {
 				session.GameID = gameID
 			}
+				// Send initial board state (starting position).
 			sendJSON(ws, BoardUpdateMsg{Type: "board_update", FEN: session.Game.Position().String()})
+			// If user plays Black, AI (White) moves first.
+			if session.Color == chess.Black {
+				makeAIFirstMove(ws, session)
+			}
 
 		case "move":
 			if session.Game == nil {
@@ -194,6 +199,33 @@ func HandleGame(c *gin.Context, userID string) {
 			"result": result,
 		})
 	}
+}
+
+// makeAIFirstMove is called when the user plays Black — the AI (White) must move first.
+func makeAIFirstMove(ws *websocket.Conn, session *GameSession) {
+	result := GetAnalysis(session.Eng, session.Game, 12)
+	if result.BestMove == "" {
+		return
+	}
+	for _, m := range session.Game.ValidMoves() {
+		if m.String() == result.BestMove {
+			session.Game.Move(m)
+			session.Moves = append(session.Moves, result.BestMove)
+			break
+		}
+	}
+	book := chessopening.NewBookECO()
+	openingName := ""
+	if op := book.Find(session.Game.Moves()); op != nil {
+		openingName = op.Title()
+	}
+	sendJSON(ws, BoardUpdateMsg{
+		Type:    "board_update",
+		FEN:     session.Game.Position().String(),
+		AIMove:  result.BestMove,
+		Eval:    result.Eval,
+		Opening: openingName,
+	})
 }
 
 func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.GenerativeModel, session *GameSession, moveStr string) {
