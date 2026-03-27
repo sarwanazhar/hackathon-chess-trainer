@@ -1,0 +1,4 @@
+# Only copy the essential source files to save RAM/CPU
+!node_modules/
+!dist/
+!.next/
