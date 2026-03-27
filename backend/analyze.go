@@ -200,7 +200,9 @@ func HandleAnalyze(c *gin.Context) {
 	}
 
 	// Mark game as analysed.
-	sb.UpdateGame(req.GameID, map[string]interface{}{"analyzed": true})
+	if req.GameID != "" {
+		sb.UpdateGame(req.GameID, map[string]interface{}{"analyzed": true})
+	}
 
 	c.JSON(http.StatusOK, AnalyzeResponse{
 		Moves:     analyses,

@@ -104,7 +104,7 @@ type GameRecord struct {
 
 type MissedMove struct {
 	UserID   string  `json:"user_id"`
-	GameID   string  `json:"game_id"`
+	GameID   string  `json:"game_id,omitempty"`
 	FEN      string  `json:"fen"`
 	UserMove string  `json:"user_move"`
 	BestMove string  `json:"best_move"`
