@@ -3,6 +3,7 @@ import { Grid, Zap, Puzzle, User, Bot, Terminal, PlusCircle, Send, Wifi, WifiOff
 import { UserButton, useAuth, useClerk } from "@clerk/nextjs";
 import { useEffect, useState, useRef } from "react";
 import { createAuthenticatedWebSocket } from "@/lib/api";
+import ReactMarkdown from 'react-markdown';
 
 export default function ChatPage() {
   const { isLoaded, userId } = useAuth();
@@ -41,13 +42,9 @@ export default function ChatPage() {
         (event) => {
           try {
             const data = JSON.parse(event.data);
-            
-            // Handle streaming chunks
             if (data.type === 'ai_response' || data.type === 'blunder_insight') {
               setMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
-                
-                // If last message is AI, append the chunk
                 if (lastMsg && lastMsg.type === 'ai') {
                   const updatedMessages = [...prev];
                   updatedMessages[updatedMessages.length - 1] = {
@@ -56,8 +53,6 @@ export default function ChatPage() {
                   };
                   return updatedMessages;
                 }
-                
-                // Otherwise, start a new AI message
                 return [...prev, { type: 'ai', content: data.content }];
               });
             }
@@ -102,7 +97,6 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen w-screen bg-[#0D1117] text-[#dfe2eb] font-body overflow-hidden flex flex-col">
-      {/* TopAppBar */}
       <header className="h-16 bg-[#181c22] border-b border-[#414754]/15 flex justify-between items-center px-6 z-50 flex-shrink-0">
         <div className="flex items-center gap-4">
           <span className="text-xl font-bold tracking-tight">Chess Senpai</span>
@@ -121,7 +115,6 @@ export default function ChatPage() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* SideNavBar */}
         <aside className="w-16 bg-[#0a0e14] border-r border-[#414754]/15 flex flex-col items-center py-6 gap-8 flex-shrink-0">
           <a href="/dashboard" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors flex flex-col items-center gap-1">
             <Grid size={20} /><span className="text-[10px]">Board</span>
@@ -134,9 +127,7 @@ export default function ChatPage() {
           </a>
         </aside>
 
-        {/* Main Chat Area */}
         <main className="flex-1 flex flex-col relative bg-[#0D1117] overflow-hidden">
-          {/* Scrollable Messages container */}
           <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 scrollbar-hide pb-32">
             <div className="max-w-4xl mx-auto w-full space-y-10">
               {messages.map((message, index) => (
@@ -167,10 +158,12 @@ export default function ChatPage() {
                         <Terminal size={12} /><span>ANALYSIS_LOG</span>
                       </div>
                     )}
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {message.content}
+                    
+                    {/* 2. REPLACED <p> WITH <ReactMarkdown> */}
+                    <div className="text-sm leading-relaxed prose prose-invert max-w-none prose-p:leading-relaxed prose-headings:text-[#acc7ff] prose-strong:text-white prose-ul:list-disc prose-ul:ml-4">
+                      <ReactMarkdown>{message.content}</ReactMarkdown>
                       {message.type === 'ai' && index === messages.length - 1 && <span className="inline-block w-1.5 h-4 ml-1 bg-[#acc7ff] animate-pulse align-middle" />}
-                    </p>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -178,7 +171,6 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Fixed Input Area */}
           <div className="absolute bottom-0 left-0 w-full p-6 bg-gradient-to-t from-[#0D1117] via-[#0D1117] to-transparent">
             <div className="max-w-2xl mx-auto relative group">
               <div className="absolute -inset-0.5 bg-[#acc7ff]/20 rounded-full blur opacity-0 group-focus-within:opacity-100 transition duration-300"></div>

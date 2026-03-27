@@ -134,7 +134,7 @@ func (ai *AIService) GenerateChatResponse(ctx context.Context, userMessage strin
 
 	log.Printf("Generating chat response for: %s", userMessage)
 
-	streamCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	streamCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
 	iter := ai.model.GenerateContentStream(streamCtx, genai.Text(prompt))
