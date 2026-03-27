@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -23,7 +24,7 @@ func HandleGetPuzzles(c *gin.Context) {
 	// Fetch user-specific puzzles from missed_moves.
 	q := fmt.Sprintf("user_id=eq.%s&order=next_review_at.asc&limit=%d", userID, limit)
 	if theme != "" {
-		q += "&theme=eq." + theme
+		q += "&theme=eq." + url.QueryEscape(theme)
 	}
 
 	userPuzzles := fetchPuzzlesFromMissedMoves(q)
@@ -33,7 +34,7 @@ func HandleGetPuzzles(c *gin.Context) {
 		remaining := limit - len(userPuzzles)
 		poolQ := fmt.Sprintf("user_id=is.null&limit=%d", remaining)
 		if theme != "" {
-			poolQ += "&theme=eq." + theme
+			poolQ += "&theme=eq." + url.QueryEscape(theme)
 		}
 		data, err := sb.dbRequest("GET", "puzzles", nil, poolQ)
 		if err == nil {
