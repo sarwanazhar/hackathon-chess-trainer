@@ -134,10 +134,12 @@ func HandleGame(c *gin.Context, userID string) {
 	eng.Run(uci.CmdUCI, uci.CmdIsReady)
 
 	personality, _ := sb.GetUserPersonality(userID)
+	level, _ := sb.GetUserLevel(userID)
 	session := &GameSession{
 		UserID:      userID,
 		Eng:         eng,
 		Personality: personality,
+		Level:       level,
 		Color:       chess.White,
 	}
 
@@ -193,9 +195,11 @@ func HandleGame(c *gin.Context, userID string) {
 
 		case "set_personality":
 			session.Personality = msg.Mode
+			go sb.UpdateProfile(session.UserID, map[string]interface{}{"personality": msg.Mode})
 
 		case "set_level":
 			session.Level = msg.Level
+			go sb.UpdateProfile(session.UserID, map[string]interface{}{"level": msg.Level})
 
 		default:
 			sendJSON(ws, WSErrorMsg{Type: "error", Message: "Unknown message type: " + msg.Type})

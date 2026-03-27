@@ -172,6 +172,30 @@ func (s *SupabaseClient) GetUserPersonality(userID string) (string, error) {
 	return result[0].Personality, nil
 }
 
+// GetUserLevel returns the user's stored skill level, defaulting to "intermediate".
+func (s *SupabaseClient) GetUserLevel(userID string) (string, error) {
+	data, err := s.dbRequest("GET", "profiles", nil, "user_id=eq."+userID+"&select=level")
+	if err != nil {
+		return "intermediate", err
+	}
+	var result []struct {
+		Level string `json:"level"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil || len(result) == 0 {
+		return "intermediate", nil
+	}
+	if result[0].Level == "" {
+		return "intermediate", nil
+	}
+	return result[0].Level, nil
+}
+
+// UpdateProfile updates mutable profile fields (personality and/or level).
+func (s *SupabaseClient) UpdateProfile(userID string, updates map[string]interface{}) error {
+	_, err := s.dbRequest("PATCH", "profiles", updates, "user_id=eq."+userID)
+	return err
+}
+
 // UpsertProfile creates or updates the profile row for a Clerk user.
 // Safe to call on every login — does nothing if the profile already exists.
 func (s *SupabaseClient) UpsertProfile(userID, username string) error {
@@ -179,6 +203,7 @@ func (s *SupabaseClient) UpsertProfile(userID, username string) error {
 		"user_id":     userID,
 		"username":    username,
 		"personality": "mentor",
+		"level":       "intermediate",
 	}
 	_, err := s.dbRequestWithPrefer("POST", "profiles", body, "", "resolution=ignore-duplicates")
 	return err
