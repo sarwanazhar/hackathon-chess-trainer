@@ -65,7 +65,8 @@ func HandlePuzzleAttempt(c *gin.Context) {
 		return
 	}
 
-	puzzle, err := fetchPuzzleByID(req.PuzzleID)
+	userID := c.GetString("user_id")
+	puzzle, err := fetchPuzzleByID(req.PuzzleID, userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "puzzle not found"})
 		return
@@ -305,8 +306,8 @@ func themeTip(theme string) string {
 // --- Helpers ---
 
 // fetchPuzzleByID looks up a puzzle by ID, checking the puzzles table first
-// then missed_moves (personal puzzles).
-func fetchPuzzleByID(id string) (*Puzzle, error) {
+// then missed_moves (personal puzzles). Personal puzzles are filtered by user_id.
+func fetchPuzzleByID(id, userID string) (*Puzzle, error) {
 	data, err := sb.dbRequest("GET", "puzzles", nil, "id=eq."+id)
 	if err == nil && len(data) > 2 {
 		var puzzles []Puzzle
@@ -316,7 +317,7 @@ func fetchPuzzleByID(id string) (*Puzzle, error) {
 	}
 
 	// Try personal puzzles from missed_moves.
-	data, err = sb.dbRequest("GET", "missed_moves", nil, "id=eq."+id)
+	data, err = sb.dbRequest("GET", "missed_moves", nil, "id=eq."+id+"&user_id=eq."+userID)
 	if err == nil && len(data) > 2 {
 		var rows []struct {
 			ID       string  `json:"id"`
