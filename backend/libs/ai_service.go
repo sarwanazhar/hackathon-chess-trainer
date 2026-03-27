@@ -90,17 +90,22 @@ func (ai *AIService) HandleWebSocketConnection(ws *websocket.Conn, chessEngine *
 
 			// 4. Send the FINAL Board state (After both moves)
 			// This ensures the board is ready for White's next turn immediately
-			ws.WriteJSON(map[string]interface{}{
+			response := map[string]interface{}{
 				"type": "board_update",
 				"move": aiResponseMove,
 				"fen":  game.FEN(),
-			})
+				"eval": evalAfter,
+			}
+			log.Printf("📤 Sending board update with eval: %.2f", evalAfter)
+			ws.WriteJSON(response)
 
 			// 5. Run tactical roast in background
 			go ai.GenerateTacticalInsight(context.Background(), userMoveStr, pieceName, engineSuggestion, aiResponseMove, aiPieceName, evalAfter, isBlunder, ws)
 
 		} else if req.Type == "chat_message" {
 			go ai.GenerateChatResponse(context.Background(), req.Content, ws)
+		} else if req.Type == "chess_analysis" {
+			go ai.GenerateChessAnalysis(context.Background(), req.Content, ws)
 		}
 	}
 }
@@ -137,6 +142,54 @@ func (ai *AIService) GenerateTacticalInsight(ctx context.Context, userMove, user
 
 func (ai *AIService) GenerateChatResponse(ctx context.Context, msg string, ws *websocket.Conn) error {
 	iter := ai.model.GenerateContentStream(ctx, genai.Text("Chess Coach: "+msg))
+	for {
+		resp, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		for _, part := range resp.Candidates[0].Content.Parts {
+			ws.WriteJSON(map[string]interface{}{"type": "ai_response", "content": fmt.Sprintf("%v", part)})
+		}
+	}
+	return nil
+}
+
+func (ai *AIService) GenerateChessAnalysis(ctx context.Context, fen string, ws *websocket.Conn) error {
+	// Define the SYSTEM and VERIFIED FACTS as specified in the task
+	systemPrompt := `### SYSTEM ###
+You are a supportive Grandmaster chess coach. The player is INTERMEDIATE: use standard chess terminology with clear strategic/tactical reasoning.
+RULES YOU MUST FOLLOW:
+- Use ONLY the information in VERIFIED FACTS below.
+- Do NOT name any square, piece, or move that is not explicitly listed in VERIFIED FACTS.
+- Do NOT invent threats, tactics, variations, or continuations not shown below.
+- Do NOT reference pawn structure beyond what is stated below.
+- If a fact is not listed, do not mention it.
+
+### VERIFIED FACTS (do not contradict or extend) ###
+Position (FEN): rnbqkb1r/pppp1ppp/5n2/4p3/8/2P1P3/PP1P1PPP/RNBQKBNR w KQkq e6 0 3
+Eval: -0.3 (Equal)
+Opening: Van't Kruijs Opening
+Best Move: d4
+Top Line: d4 e4 c4 c6 Nc3
+
+Board Facts:
+- No obvious hanging pieces
+- King Safety: Both kings are reasonably safe
+- Material is equal
+- Pawn Structure: No notable pawn weaknesses
+
+User played: a4 | Eval drop: -1.1 (good)
+
+### TASK ###
+In 2 sentences, explain why d4 is the best move, using only the facts above. Reference the Van't Kruijs Opening only if directly relevant.`
+
+	// Create the complete prompt
+	prompt := fmt.Sprintf("%s\n\n%s", systemPrompt, fen)
+
+	iter := ai.model.GenerateContentStream(ctx, genai.Text(prompt))
 	for {
 		resp, err := iter.Next()
 		if err == iterator.Done {
