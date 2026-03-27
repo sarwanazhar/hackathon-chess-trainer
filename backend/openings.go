@@ -41,7 +41,7 @@ func HandleLearn(c *gin.Context) {
 	}
 
 	// Normalize for both display and DB lookup.
-	topicDisplay := strings.Title(strings.ReplaceAll(topic, "-", " "))
+	topicDisplay := titleCase(strings.ReplaceAll(topic, "-", " "))
 	topicKey := strings.ToLower(strings.ReplaceAll(topic, "-", " "))
 
 	// 1. Try DB cache first.
@@ -204,4 +204,16 @@ Respond with valid JSON only, no markdown fences:
 		return raw, nil
 	}
 	return out.Summary, out.KeyIdeas
+}
+
+// titleCase converts a hyphen/space-separated string to Title Case.
+// Replaces the deprecated strings.Title.
+func titleCase(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }
