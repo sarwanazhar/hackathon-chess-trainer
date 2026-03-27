@@ -1,0 +1,310 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"os"
+	"time"
+)
+
+type SupabaseClient struct {
+	URL        string
+	ServiceKey string
+	HTTPClient *http.Client
+}
+
+func NewSupabaseClient() *SupabaseClient {
+	return &SupabaseClient{
+		URL:        os.Getenv("SUPABASE_URL"),
+		ServiceKey: os.Getenv("SUPABASE_SERVICE_KEY"),
+		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+// dbRequest makes an authenticated request to the Supabase PostgREST API.
+func (s *SupabaseClient) dbRequest(method, table string, body interface{}, query string) ([]byte, error) {
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = bytes.NewReader(b)
+	}
+
+	url := fmt.Sprintf("%s/rest/v1/%s", s.URL, table)
+	if query != "" {
+		url += "?" + query
+	}
+
+	req, err := http.NewRequest(method, url, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("apikey", s.ServiceKey)
+	req.Header.Set("Authorization", "Bearer "+s.ServiceKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "return=representation")
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("supabase %s %s → %d: %s", method, table, resp.StatusCode, string(data))
+	}
+	return data, nil
+}
+
+// dbRequestWithPrefer is like dbRequest but lets the caller override the Prefer header.
+func (s *SupabaseClient) dbRequestWithPrefer(method, table string, body interface{}, query, prefer string) ([]byte, error) {
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = bytes.NewReader(b)
+	}
+
+	u := fmt.Sprintf("%s/rest/v1/%s", s.URL, table)
+	if query != "" {
+		u += "?" + query
+	}
+
+	req, err := http.NewRequest(method, u, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("apikey", s.ServiceKey)
+	req.Header.Set("Authorization", "Bearer "+s.ServiceKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", prefer)
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("supabase %s %s → %d: %s", method, table, resp.StatusCode, string(data))
+	}
+	return data, nil
+}
+
+// --- Shared DB types ---
+
+type GameRecord struct {
+	UserID string   `json:"user_id"`
+	Moves  []string `json:"moves,omitempty"`
+	Color  string   `json:"color"`
+	Result string   `json:"result,omitempty"`
+	PGN    string   `json:"pgn,omitempty"`
+}
+
+type MissedMove struct {
+	UserID   string  `json:"user_id"`
+	GameID   string  `json:"game_id,omitempty"`
+	FEN      string  `json:"fen"`
+	UserMove string  `json:"user_move"`
+	BestMove string  `json:"best_move"`
+	EvalDrop float64 `json:"eval_drop"`
+	Theme    string  `json:"theme"`
+}
+
+type Puzzle struct {
+	ID         string   `json:"id"`
+	FEN        string   `json:"fen"`
+	Solution   []string `json:"solution"`
+	Theme      string   `json:"theme"`
+	Difficulty int      `json:"difficulty"`
+}
+
+// --- DB helpers ---
+
+func (s *SupabaseClient) SaveGame(g GameRecord) (string, error) {
+	data, err := s.dbRequest("POST", "games", g, "")
+	if err != nil {
+		return "", err
+	}
+	var result []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil || len(result) == 0 {
+		return "", fmt.Errorf("save game failed: %s", string(data))
+	}
+	return result[0].ID, nil
+}
+
+func (s *SupabaseClient) UpdateGame(gameID string, updates map[string]interface{}) error {
+	_, err := s.dbRequest("PATCH", "games", updates, "id=eq."+gameID)
+	return err
+}
+
+func (s *SupabaseClient) SaveMissedMove(m MissedMove) error {
+	_, err := s.dbRequest("POST", "missed_moves", m, "")
+	return err
+}
+
+func (s *SupabaseClient) GetUserPersonality(userID string) (string, error) {
+	data, err := s.dbRequest("GET", "profiles", nil, "user_id=eq."+userID+"&select=personality")
+	if err != nil {
+		return "mentor", err
+	}
+	var result []struct {
+		Personality string `json:"personality"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil || len(result) == 0 {
+		return "mentor", nil
+	}
+	return result[0].Personality, nil
+}
+
+// GetUserLevel returns the user's stored skill level, defaulting to "intermediate".
+func (s *SupabaseClient) GetUserLevel(userID string) (string, error) {
+	data, err := s.dbRequest("GET", "profiles", nil, "user_id=eq."+userID+"&select=level")
+	if err != nil {
+		return "intermediate", err
+	}
+	var result []struct {
+		Level string `json:"level"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil || len(result) == 0 {
+		return "intermediate", nil
+	}
+	if result[0].Level == "" {
+		return "intermediate", nil
+	}
+	return result[0].Level, nil
+}
+
+// UpdateProfile updates mutable profile fields (personality and/or level).
+func (s *SupabaseClient) UpdateProfile(userID string, updates map[string]interface{}) error {
+	_, err := s.dbRequest("PATCH", "profiles", updates, "user_id=eq."+userID)
+	return err
+}
+
+// UpsertProfile creates or updates the profile row for a Clerk user.
+// Safe to call on every login — does nothing if the profile already exists.
+func (s *SupabaseClient) UpsertProfile(userID, username string) error {
+	body := map[string]interface{}{
+		"user_id":     userID,
+		"username":    username,
+		"personality": "mentor",
+		"level":       "intermediate",
+	}
+	_, err := s.dbRequestWithPrefer("POST", "profiles", body, "", "resolution=ignore-duplicates")
+	return err
+}
+
+// Profile represents a user's profile row.
+type Profile struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	Rating      int    `json:"rating"`
+	Personality string `json:"personality"`
+}
+
+// GetProfile fetches the full profile for a user.
+func (s *SupabaseClient) GetProfile(userID string) (*Profile, error) {
+	data, err := s.dbRequest("GET", "profiles", nil,
+		"user_id=eq."+userID+"&select=user_id,username,rating,personality")
+	if err != nil {
+		return nil, err
+	}
+	var result []Profile
+	if err := json.Unmarshal(data, &result); err != nil || len(result) == 0 {
+		return nil, fmt.Errorf("profile not found for user %s", userID)
+	}
+	return &result[0], nil
+}
+
+// GameSummary is returned by GET /api/games.
+type GameSummary struct {
+	ID       string `json:"id"`
+	Color    string `json:"color"`
+	Result   string `json:"result"`
+	Analyzed bool   `json:"analyzed"`
+}
+
+// GetGames returns the user's game history, most recent first.
+func (s *SupabaseClient) GetGames(userID string, limit int) ([]GameSummary, error) {
+	q := fmt.Sprintf("user_id=eq.%s&select=id,color,result,analyzed&order=created_at.desc&limit=%d",
+		userID, limit)
+	data, err := s.dbRequest("GET", "games", nil, q)
+	if err != nil {
+		return nil, err
+	}
+	var games []GameSummary
+	if err := json.Unmarshal(data, &games); err != nil {
+		return nil, err
+	}
+	return games, nil
+}
+
+// newElo calculates the updated Elo rating.
+// opponentRating: 1500 (fixed AI strength reference).
+// result: 1.0 = win, 0.5 = draw, 0.0 = loss.
+func newElo(playerRating, opponentRating int, result float64) int {
+	const K = 32
+	expected := 1.0 / (1.0 + math.Pow(10, float64(opponentRating-playerRating)/400.0))
+	return playerRating + int(math.Round(K*(result-expected)))
+}
+
+// UpdateRating reads the current rating and writes the new one after a game result.
+// gameResult: "win", "loss", or "draw".
+func (s *SupabaseClient) UpdateRating(userID, gameResult string) error {
+	profile, err := s.GetProfile(userID)
+	if err != nil {
+		return err
+	}
+	var score float64
+	switch gameResult {
+	case "win":
+		score = 1.0
+	case "draw":
+		score = 0.5
+	default:
+		score = 0.0
+	}
+	const aiRating = 1500
+	updated := newElo(profile.Rating, aiRating, score)
+	_, err = s.dbRequest("PATCH", "profiles",
+		map[string]interface{}{"rating": updated},
+		"user_id=eq."+userID,
+	)
+	return err
+}
+
+// IncrementAttemptCount increments the attempt counter on a missed_moves row.
+func (s *SupabaseClient) IncrementAttemptCount(puzzleID string) error {
+	data, err := s.dbRequest("GET", "missed_moves", nil,
+		"id=eq."+puzzleID+"&select=attempt_count")
+	if err != nil {
+		return err
+	}
+	var rows []struct {
+		AttemptCount int `json:"attempt_count"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil // puzzle not in missed_moves (general pool) — skip
+	}
+	_, err = s.dbRequest("PATCH", "missed_moves",
+		map[string]interface{}{"attempt_count": rows[0].AttemptCount + 1},
+		"id=eq."+puzzleID,
+	)
+	return err
+}
