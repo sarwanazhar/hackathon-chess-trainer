@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +17,8 @@ import (
 )
 
 type AnalyzeRequest struct {
-	GameID string `json:"game_id" binding:"required"`
+	GameID string `json:"game_id"`
+	PGN    string `json:"pgn"`
 }
 
 type MoveAnalysis struct {
@@ -42,23 +44,42 @@ func HandleAnalyze(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 
-	// Fetch game from DB.
-	data, err := sb.dbRequest("GET", "games", nil,
-		"id=eq."+req.GameID+"&user_id=eq."+userID+"&select=moves,pgn")
-	if err != nil || len(data) < 3 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "game not found"})
+	var uciMoves []string
+
+	if req.PGN != "" {
+		// Parse PGN directly — no DB lookup needed.
+		pgn, err := chess.PGN(strings.NewReader(req.PGN))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid PGN: " + err.Error()})
+			return
+		}
+		pgnGame := chess.NewGame(pgn)
+		for _, m := range pgnGame.Moves() {
+			uciMoves = append(uciMoves, m.String())
+		}
+	} else if req.GameID != "" {
+		// Fetch game from DB.
+		data, err := sb.dbRequest("GET", "games", nil,
+			"id=eq."+req.GameID+"&user_id=eq."+userID+"&select=moves,pgn")
+		if err != nil || len(data) < 3 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "game not found"})
+			return
+		}
+
+		var rows []struct {
+			Moves []string `json:"moves"`
+			PGN   string   `json:"pgn"`
+		}
+		if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse game"})
+			return
+		}
+		uciMoves = rows[0].Moves
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "game_id or pgn required"})
 		return
 	}
 
-	var rows []struct {
-		Moves []string `json:"moves"`
-		PGN   string   `json:"pgn"`
-	}
-	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse game"})
-		return
-	}
-	uciMoves := rows[0].Moves
 	if len(uciMoves) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no moves in game"})
 		return

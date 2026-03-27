@@ -48,8 +48,19 @@ CREATE TABLE IF NOT EXISTS public.puzzles (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Videos cache (pre-seeded YouTube videos per topic, served from DB — no live API call per request)
+CREATE TABLE IF NOT EXISTS public.videos (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    topic      TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    video_url  TEXT NOT NULL UNIQUE,
+    channel    TEXT,
+    fetched_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_games_user_id ON public.games(user_id);
+CREATE INDEX IF NOT EXISTS idx_videos_topic  ON public.videos(topic);
 CREATE INDEX IF NOT EXISTS idx_missed_moves_user_id ON public.missed_moves(user_id);
 CREATE INDEX IF NOT EXISTS idx_missed_moves_review ON public.missed_moves(next_review_at);
 CREATE INDEX IF NOT EXISTS idx_puzzles_pool ON public.puzzles(user_id) WHERE user_id IS NULL;
@@ -59,6 +70,7 @@ ALTER TABLE public.profiles    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.games       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.missed_moves ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.puzzles     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.videos      ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies: users can only see their own data
 CREATE POLICY "profiles_own" ON public.profiles    USING (auth.uid() = user_id);
@@ -71,3 +83,6 @@ CREATE POLICY "profiles_service" ON public.profiles    TO service_role USING (tr
 CREATE POLICY "games_service"    ON public.games       TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "missed_service"   ON public.missed_moves TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "puzzles_service"  ON public.puzzles     TO service_role USING (true) WITH CHECK (true);
+-- Videos: anyone can read, service role can write
+CREATE POLICY "videos_read"    ON public.videos FOR SELECT USING (true);
+CREATE POLICY "videos_service" ON public.videos TO service_role USING (true) WITH CHECK (true);

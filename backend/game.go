@@ -13,6 +13,7 @@ import (
 	"github.com/google/generative-ai-go/genai"
 	"github.com/gorilla/websocket"
 	"github.com/notnil/chess"
+	chessopening "github.com/notnil/chess/opening"
 	"github.com/notnil/chess/uci"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -26,23 +27,31 @@ type GameSession struct {
 	GameID      string
 	Color       chess.Color
 	Personality string
+	Level       string // beginner | intermediate | advanced
 	Moves       []string // UCI move history
 }
 
 // --- Inbound JSON ---
 type ClientMsg struct {
-	Type  string `json:"type"`  // new_game | move | hint | set_personality
+	Type  string `json:"type"`  // new_game | move | hint | set_personality | set_level
 	Move  string `json:"move"`  // UCI e.g. "e2e4"
 	Color string `json:"color"` // white | black
 	Mode  string `json:"mode"`  // roast | mentor
+	Level string `json:"level"` // beginner | intermediate | advanced
 }
 
 // --- Outbound JSON ---
 type BoardUpdateMsg struct {
-	Type   string  `json:"type"`
-	FEN    string  `json:"fen"`
-	AIMove string  `json:"ai_move,omitempty"`
-	Eval   float64 `json:"eval"`
+	Type    string  `json:"type"`
+	FEN     string  `json:"fen"`
+	AIMove  string  `json:"ai_move,omitempty"`
+	Eval    float64 `json:"eval"`
+	Opening string  `json:"opening,omitempty"`
+}
+
+type DebugPromptMsg struct {
+	Type   string `json:"type"`
+	Prompt string `json:"prompt"`
 }
 
 type CoachChunkMsg struct {
@@ -168,6 +177,9 @@ func HandleGame(c *gin.Context, userID string) {
 		case "set_personality":
 			session.Personality = msg.Mode
 
+		case "set_level":
+			session.Level = msg.Level
+
 		default:
 			sendJSON(ws, WSErrorMsg{Type: "error", Message: "Unknown message type: " + msg.Type})
 		}
@@ -188,6 +200,7 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 	game := session.Game
 
 	// Eval BEFORE the user's move → what the user SHOULD have played.
+	preMovefen := game.Position().String()
 	beforeResult := GetAnalysis(session.Eng, game, 15)
 
 	// Validate move.
@@ -240,21 +253,36 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 
 	// Apply AI's best response.
 	aiMoveStr := afterResult.BestMove
+	aiApplied := false
 	for _, m := range game.ValidMoves() {
 		if m.String() == aiMoveStr {
 			game.Move(m)
 			session.Moves = append(session.Moves, aiMoveStr)
+			aiApplied = true
 			break
 		}
+	}
+	if !aiApplied {
+		log.Printf("AI move %q not found in valid moves for position %s", aiMoveStr, game.Position().String())
+		sendJSON(ws, WSErrorMsg{Type: "error", Message: "AI could not make a move — game state reset required"})
+		return
+	}
+
+	// Detect opening name.
+	openingName := ""
+	book := chessopening.NewBookECO()
+	if op := book.Find(game.Moves()); op != nil {
+		openingName = op.Title()
 	}
 
 	// Quick eval for board_update.
 	quickEval := GetAnalysis(session.Eng, game, 8)
 	sendJSON(ws, BoardUpdateMsg{
-		Type:   "board_update",
-		FEN:    game.Position().String(),
-		AIMove: aiMoveStr,
-		Eval:   quickEval.Eval,
+		Type:    "board_update",
+		FEN:     game.Position().String(),
+		AIMove:  aiMoveStr,
+		Eval:    quickEval.Eval,
+		Opening: openingName,
 	})
 
 	// Check game over after AI move.
@@ -266,7 +294,14 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 
 	// Build grounded situation report and stream coaching.
 	facts := AnalyzeBoard(game.Position())
-	report := BuildSituationReport(beforeResult, facts, userMoveSAN, evalDrop, session.Personality)
+	userColorStr := "white"
+	if session.Color == chess.Black {
+		userColorStr = "black"
+	}
+	report := BuildSituationReport(beforeResult, facts, userMoveSAN, evalDrop, session.Personality, session.Level, openingName, preMovefen, afterResult.BestSAN, userColorStr)
+
+	// Send prompt to client for transparency.
+	sendJSON(ws, DebugPromptMsg{Type: "debug_prompt", Prompt: report})
 
 	streamCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()

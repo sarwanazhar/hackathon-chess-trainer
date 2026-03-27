@@ -70,16 +70,6 @@ func TestAuthServiceReachable(t *testing.T) {
 	t.Log("PASS - Auth service healthy")
 }
 
-// TestVerifyJWTRejectsGarbage ensures VerifyJWT correctly rejects invalid tokens.
-func TestVerifyJWTRejectsGarbage(t *testing.T) {
-	sb := setupTestClient(t)
-	_, err := sb.VerifyJWT("this.is.not.a.valid.token")
-	if err == nil {
-		t.Fatal("FAIL - expected error for invalid token, got nil")
-	}
-	t.Logf("PASS - invalid token correctly rejected: %v", err)
-}
-
 // TestTablesExist checks whether the required tables are present.
 func TestTablesExist(t *testing.T) {
 	sb := setupTestClient(t)

@@ -3,8 +3,11 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
+	"github.com/clerk/clerk-sdk-go/v2"
+	clerkjwt "github.com/clerk/clerk-sdk-go/v2/jwt"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
@@ -22,24 +25,33 @@ func main() {
 		log.Println("Note: .env file not found, using system environment variables")
 	}
 
+	clerk.SetKey(os.Getenv("CLERK_SECRET_KEY"))
 	sb = NewSupabaseClient()
 
 	r := gin.Default()
 
+	// CORS — allow all origins (hackathon / local testing).
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
 	// WebSocket — auth via ?token= query param.
 	r.GET("/ws/game", func(c *gin.Context) {
 		token := c.Query("token")
-		userID, err := sb.VerifyJWT(token)
+		claims, err := clerkjwt.Verify(c.Request.Context(), &clerkjwt.VerifyParams{Token: token})
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
-		HandleGame(c, userID)
+		HandleGame(c, claims.Subject)
 	})
-
-	// Public auth routes — no JWT required.
-	r.POST("/auth/register", HandleRegister)
-	r.POST("/auth/login", HandleLogin)
 
 	// REST — auth via Authorization: Bearer <jwt> header.
 	api := r.Group("/api", authMiddleware())
@@ -47,6 +59,8 @@ func main() {
 	api.POST("/analyze", HandleAnalyze)
 	api.GET("/puzzles", HandleGetPuzzles)
 	api.POST("/puzzles/complete", HandlePuzzleComplete)
+	api.POST("/puzzles/attempt", HandlePuzzleAttempt)
+	api.POST("/puzzles/coach", HandlePuzzleCoach)
 	api.GET("/learn", HandleLearn)
 
 	log.Println("Chess Trainer Backend starting on :8080...")
@@ -63,12 +77,12 @@ func authMiddleware() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 			return
 		}
-		userID, err := sb.VerifyJWT(token)
+		claims, err := clerkjwt.Verify(c.Request.Context(), &clerkjwt.VerifyParams{Token: token})
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
-		c.Set("user_id", userID)
+		c.Set("user_id", claims.Subject)
 		c.Next()
 	}
 }

@@ -26,38 +26,6 @@ func NewSupabaseClient() *SupabaseClient {
 	}
 }
 
-// VerifyJWT validates a Supabase JWT by calling the Supabase auth API.
-// This works with both legacy HS256 and the newer ECC P-256 signing keys.
-func (s *SupabaseClient) VerifyJWT(tokenStr string) (string, error) {
-	req, err := http.NewRequest("GET", s.URL+"/auth/v1/user", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+tokenStr)
-	req.Header.Set("apikey", s.ServiceKey)
-
-	resp, err := s.HTTPClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("invalid token (status %d)", resp.StatusCode)
-	}
-
-	var user struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		return "", err
-	}
-	if user.ID == "" {
-		return "", fmt.Errorf("missing user id in auth response")
-	}
-	return user.ID, nil
-}
-
 // dbRequest makes an authenticated request to the Supabase PostgREST API.
 func (s *SupabaseClient) dbRequest(method, table string, body interface{}, query string) ([]byte, error) {
 	var reqBody io.Reader
@@ -82,6 +50,39 @@ func (s *SupabaseClient) dbRequest(method, table string, body interface{}, query
 	req.Header.Set("Authorization", "Bearer "+s.ServiceKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Prefer", "return=representation")
+
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+// dbRequestWithPrefer is like dbRequest but lets the caller override the Prefer header.
+func (s *SupabaseClient) dbRequestWithPrefer(method, table string, body interface{}, query, prefer string) ([]byte, error) {
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = bytes.NewReader(b)
+	}
+
+	u := fmt.Sprintf("%s/rest/v1/%s", s.URL, table)
+	if query != "" {
+		u += "?" + query
+	}
+
+	req, err := http.NewRequest(method, u, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("apikey", s.ServiceKey)
+	req.Header.Set("Authorization", "Bearer "+s.ServiceKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", prefer)
 
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {

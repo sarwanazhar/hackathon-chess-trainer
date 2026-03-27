@@ -12,6 +12,7 @@ type BoardFacts struct {
 	HangingPieces []string
 	KingSafety    string
 	MaterialDiff  string
+	PawnStructure string
 }
 
 var pieceValues = map[chess.PieceType]int{
@@ -28,7 +29,111 @@ func AnalyzeBoard(pos *chess.Position) BoardFacts {
 		HangingPieces: FindHangingPieces(pos),
 		KingSafety:    KingSafety(pos),
 		MaterialDiff:  MaterialBalance(pos),
+		PawnStructure: PawnStructureAnalysis(pos),
 	}
+}
+
+// PawnStructureAnalysis returns a string describing doubled, isolated, and passed pawns.
+func PawnStructureAnalysis(pos *chess.Position) string {
+	board := pos.Board().SquareMap()
+
+	whitePawnFiles := map[chess.File]int{}
+	blackPawnFiles := map[chess.File]int{}
+	whitePawnRanksByFile := map[chess.File][]chess.Rank{}
+	blackPawnRanksByFile := map[chess.File][]chess.Rank{}
+
+	for sq, p := range board {
+		if p.Type() != chess.Pawn {
+			continue
+		}
+		f := sq.File()
+		r := sq.Rank()
+		if p.Color() == chess.White {
+			whitePawnFiles[f]++
+			whitePawnRanksByFile[f] = append(whitePawnRanksByFile[f], r)
+		} else {
+			blackPawnFiles[f]++
+			blackPawnRanksByFile[f] = append(blackPawnRanksByFile[f], r)
+		}
+	}
+
+	var notes []string
+
+	// Doubled pawns
+	for f, cnt := range whitePawnFiles {
+		if cnt > 1 {
+			notes = append(notes, fmt.Sprintf("White doubled pawns on %c-file", 'a'+byte(f)))
+		}
+	}
+	for f, cnt := range blackPawnFiles {
+		if cnt > 1 {
+			notes = append(notes, fmt.Sprintf("Black doubled pawns on %c-file", 'a'+byte(f)))
+		}
+	}
+
+	// Isolated pawns (no friendly pawn on adjacent files)
+	for f := range whitePawnFiles {
+		hasLeft := int(f) > 0 && whitePawnFiles[chess.File(int(f)-1)] > 0
+		hasRight := int(f) < 7 && whitePawnFiles[chess.File(int(f)+1)] > 0
+		if !hasLeft && !hasRight {
+			notes = append(notes, fmt.Sprintf("White isolated pawn on %c-file", 'a'+byte(f)))
+		}
+	}
+	for f := range blackPawnFiles {
+		hasLeft := int(f) > 0 && blackPawnFiles[chess.File(int(f)-1)] > 0
+		hasRight := int(f) < 7 && blackPawnFiles[chess.File(int(f)+1)] > 0
+		if !hasLeft && !hasRight {
+			notes = append(notes, fmt.Sprintf("Black isolated pawn on %c-file", 'a'+byte(f)))
+		}
+	}
+
+	// Passed pawns (no opposing pawn on same or adjacent files ahead)
+	for f, ranks := range whitePawnRanksByFile {
+		for _, r := range ranks {
+			passed := true
+			for df := -1; df <= 1; df++ {
+				nfIdx := int(f) + df
+				if nfIdx < 0 || nfIdx > 7 {
+					continue
+				}
+				for _, br := range blackPawnRanksByFile[chess.File(nfIdx)] {
+					if br > r {
+						passed = false
+					}
+				}
+			}
+			if passed && len(blackPawnFiles) > 0 {
+				notes = append(notes, fmt.Sprintf("White passed pawn on %c%d", 'a'+byte(f), int(r)+1))
+			}
+		}
+	}
+	for f, ranks := range blackPawnRanksByFile {
+		for _, r := range ranks {
+			passed := true
+			for df := -1; df <= 1; df++ {
+				nfIdx := int(f) + df
+				if nfIdx < 0 || nfIdx > 7 {
+					continue
+				}
+				for _, wr := range whitePawnRanksByFile[chess.File(nfIdx)] {
+					if wr < r {
+						passed = false
+					}
+				}
+			}
+			if passed && len(whitePawnFiles) > 0 {
+				notes = append(notes, fmt.Sprintf("Black passed pawn on %c%d", 'a'+byte(f), int(r)+1))
+			}
+		}
+	}
+
+	if len(notes) == 0 {
+		return "No notable pawn weaknesses"
+	}
+	if len(notes) > 4 {
+		notes = notes[:4]
+	}
+	return strings.Join(notes, "; ")
 }
 
 // FindHangingPieces returns pieces that can be captured by a less-valuable (or equal-value) attacker.
