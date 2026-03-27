@@ -102,7 +102,7 @@ func PawnStructureAnalysis(pos *chess.Position) string {
 					}
 				}
 			}
-			if passed && len(blackPawnFiles) > 0 {
+			if passed {
 				notes = append(notes, fmt.Sprintf("White passed pawn on %c%d", 'a'+byte(f), int(r)+1))
 			}
 		}
@@ -121,7 +121,7 @@ func PawnStructureAnalysis(pos *chess.Position) string {
 					}
 				}
 			}
-			if passed && len(whitePawnFiles) > 0 {
+			if passed {
 				notes = append(notes, fmt.Sprintf("Black passed pawn on %c%d", 'a'+byte(f), int(r)+1))
 			}
 		}
