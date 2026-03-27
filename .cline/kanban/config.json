@@ -1,0 +1,9 @@
+{
+  "shortcuts": [
+    {
+      "label": "Run",
+      "command": "cd frontend && pnpm dev",
+      "icon": "play"
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@layer utilities {
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+  
+  .cursor-blink {
+    display: inline-block;
+    width: 8px;
+    height: 18px;
+    background-color: #acc7ff;
+    margin-left: 4px;
+    vertical-align: middle;
+    animation: blink 1s step-end infinite;
+  }
+  
+  .terminal-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  
+  .terminal-scroll::-webkit-scrollbar-track {
+    background: #0a0e14;
+  }
+  
+  .terminal-scroll::-webkit-scrollbar-thumb {
+    background: #31353c;
+  }
+  
+  .glass-panel {
+    background: rgba(49, 53, 60, 0.6);
+    backdrop-filter: blur(20px);
+  }
+  
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+/* Force the board to fill its responsive container */
+.cg-wrap {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Ensure the background board image scales */
+cg-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Make coordinates readable but small on mobile */
+coords {
+  font-size: 8px;
+}
+
+@media (min-width: 640px) {
+  coords {
+    font-size: 12px;
+  }
+}
