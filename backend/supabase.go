@@ -12,7 +12,6 @@ import (
 
 type SupabaseClient struct {
 	URL        string
-	JWTSecret  string
 	ServiceKey string
 	HTTPClient *http.Client
 }
@@ -20,7 +19,6 @@ type SupabaseClient struct {
 func NewSupabaseClient() *SupabaseClient {
 	return &SupabaseClient{
 		URL:        os.Getenv("SUPABASE_URL"),
-		JWTSecret:  os.Getenv("SUPABASE_JWT_SECRET"),
 		ServiceKey: os.Getenv("SUPABASE_SERVICE_KEY"),
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
