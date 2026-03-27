@@ -38,6 +38,7 @@ export default function TestGame() {
       
       <div className="w-[500px] aspect-square shadow-2xl border-4 border-slate-700">
         <Chessboard 
+        //@ts-ignore
           position={game.fen()} 
           onPieceDrop={onDrop} 
           boardOrientation="white"
