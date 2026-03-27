@@ -56,7 +56,14 @@ func (s *SupabaseClient) dbRequest(method, table string, body interface{}, query
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("supabase %s %s → %d: %s", method, table, resp.StatusCode, string(data))
+	}
+	return data, nil
 }
 
 // dbRequestWithPrefer is like dbRequest but lets the caller override the Prefer header.
@@ -89,7 +96,14 @@ func (s *SupabaseClient) dbRequestWithPrefer(method, table string, body interfac
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("supabase %s %s → %d: %s", method, table, resp.StatusCode, string(data))
+	}
+	return data, nil
 }
 
 // --- Shared DB types ---
