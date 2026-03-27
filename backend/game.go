@@ -158,7 +158,7 @@ func HandleGame(c *gin.Context, userID string) {
 			if gameID, err := sb.SaveGame(GameRecord{UserID: userID, Color: msg.Color}); err == nil {
 				session.GameID = gameID
 			}
-				// Send initial board state (starting position).
+		// Send initial board state (starting position).
 			sendJSON(ws, BoardUpdateMsg{Type: "board_update", FEN: session.Game.Position().String()})
 			// If user plays Black, AI (White) moves first.
 			if session.Color == chess.Black {
@@ -207,12 +207,19 @@ func makeAIFirstMove(ws *websocket.Conn, session *GameSession) {
 	if result.BestMove == "" {
 		return
 	}
+	moveFound := false
 	for _, m := range session.Game.ValidMoves() {
 		if m.String() == result.BestMove {
 			session.Game.Move(m)
 			session.Moves = append(session.Moves, result.BestMove)
+			moveFound = true
 			break
 		}
+	}
+	if !moveFound {
+		log.Printf("makeAIFirstMove: AI move %q not found in valid moves", result.BestMove)
+		sendJSON(ws, WSErrorMsg{Type: "error", Message: "AI failed to make opening move"})
+		return
 	}
 	book := chessopening.NewBookECO()
 	openingName := ""
