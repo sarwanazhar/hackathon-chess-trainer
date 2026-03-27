@@ -44,7 +44,9 @@ func HandleChat(c *gin.Context) {
 
 	// If game_id provided, add game context.
 	if req.GameID != "" {
-		data, err := sb.dbRequest("GET", "games", nil, "id=eq."+req.GameID+"&select=pgn,result,color")
+		userID := c.GetString("user_id")
+		data, err := sb.dbRequest("GET", "games", nil,
+			"id=eq."+req.GameID+"&user_id=eq."+userID+"&select=pgn,result,color")
 		if err == nil && len(data) > 2 {
 			systemPrompt += "\n\nGame context: " + string(data)
 		}
