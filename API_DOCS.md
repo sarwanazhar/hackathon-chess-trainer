@@ -16,10 +16,12 @@
    - [Submit Move (`POST /api/puzzles/attempt`)](#post-apipuzzlesattempt)
    - [Get Coaching (`POST /api/puzzles/coach`)](#post-apipuzzlescoach)
    - [Complete Puzzle (`POST /api/puzzles/complete`)](#post-apipuzzlescomplete)
-6. [REST — Opening Learning (`GET /api/learn`)](#get-apilearn)
-7. [Error Handling](#error-handling)
-8. [Data Types Reference](#data-types-reference)
-9. [Auth Integration — Clerk + Backend (read last)](#auth-integration--clerk--backend)
+6. [REST — Profile (`GET /api/profile`)](#get-apiprofile)
+7. [REST — Game History (`GET /api/games`)](#get-apigames)
+8. [REST — Opening Learning (`GET /api/learn`)](#get-apilearn)
+9. [Error Handling](#error-handling)
+10. [Data Types Reference](#data-types-reference)
+11. [Auth Integration — Clerk + Backend (read last)](#auth-integration--clerk--backend)
 
 ---
 
@@ -111,7 +113,7 @@ Ask for the best move in the current position. Can be called any time during a g
 ---
 
 #### `set_personality`
-Change the AI coach's communication style. Persisted for the session.
+Change the AI coach's communication style. **Persisted to the database** — survives reconnects.
 
 ```json
 {
@@ -129,7 +131,7 @@ No response message — takes effect on the next coaching message.
 ---
 
 #### `set_level`
-Adjust coaching depth and vocabulary for the user's skill level.
+Adjust coaching depth and vocabulary for the user's skill level. **Persisted to the database** — survives reconnects.
 
 ```json
 {
@@ -363,7 +365,7 @@ or
     { "move": "Nf3", "eval": 0.4,  "grade": "good" },
     { "move": "Nc6", "eval": 0.0,  "grade": "good" },
     { "move": "Bc4", "eval": 0.5,  "grade": "good" },
-    { "move": "d6",  "eval": -0.8, "grade": "mistake" }
+    { "move": "d6",  "eval": -0.8, "grade": "mistake", "comment": "d6 blocks the bishop and loses central control; d5 was the equalising reply." }
   ],
   "summary": "You played a solid opening but lost the thread in the middlegame with 3 mistakes. Focus on piece coordination.",
   "weak_areas": ["tactic", "endgame"]
@@ -376,6 +378,7 @@ or
 | `moves[].move` | string | Move in **SAN** notation |
 | `moves[].eval` | number | Engine eval after this move (pawns, White POV) |
 | `moves[].grade` | string | `"good"` \| `"inaccuracy"` \| `"mistake"` \| `"blunder"` |
+| `moves[].comment` | string | One-sentence AI explanation — **only present for `mistake` and `blunder`** |
 | `summary` | string | 2-sentence AI coaching summary |
 | `weak_areas` | string[] | Detected weak tactical themes |
 
@@ -539,12 +542,18 @@ Call this after receiving `correct: false` from `/attempt`.
 
 ### `POST /api/puzzles/complete`
 
-Record the result of a completed puzzle attempt and schedule the next review (spaced repetition).
+Record the result of a completed puzzle attempt and schedule the next review using spaced repetition (SRS).
 
-| Result | Next Review |
-|--------|-------------|
-| `solved: true` | 7 days |
-| `solved: false` | 24 hours |
+Intervals grow with each successful solve. A failed attempt always resets to 24 hours.
+
+| Solve # | Next Review |
+|---------|-------------|
+| 1st solve | 1 day |
+| 2nd solve | 3 days |
+| 3rd solve | 7 days |
+| 4th solve | 14 days |
+| 5th+ solve | 30 days |
+| Failed (`solved: false`) | 24 hours |
 
 **Request:**
 ```json
@@ -563,8 +572,81 @@ Record the result of a completed puzzle attempt and schedule the next review (sp
 
 **Response:**
 ```json
-{ "ok": true }
+{ "ok": true, "next_review": "2026-03-28T22:09:00Z" }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ok` | boolean | Always `true` on success |
+| `next_review` | string | ISO 8601 timestamp of the next scheduled review |
+
+---
+
+## `GET /api/profile`
+
+Returns the current user's profile (rating, personality, username).
+
+**Response:**
+```json
+{
+  "user_id": "user_2abc...",
+  "username": "Magnus",
+  "rating": 1024,
+  "personality": "mentor"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user_id` | string | Clerk user ID |
+| `username` | string | Display name |
+| `rating` | number | Elo rating (starts at 800, updated after each game) |
+| `personality` | string | Active coaching mode (`"mentor"` or `"roast"`) |
+
+> **Note:** The `rating` field is updated automatically after every finished game (win/loss/draw) using K=32 Elo vs a fixed 1500 AI rating.
+
+---
+
+## `GET /api/games`
+
+Returns the user's game history, most recent first.
+
+**Query parameters:**
+
+| Param | Type | Default | Max | Description |
+|-------|------|---------|-----|-------------|
+| `limit` | number | `20` | `100` | Max games to return |
+
+**Example:**
+```
+GET /api/games?limit=10
+Authorization: Bearer <token>
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "uuid",
+    "color": "white",
+    "result": "win",
+    "analyzed": false
+  },
+  {
+    "id": "uuid",
+    "color": "black",
+    "result": "loss",
+    "analyzed": true
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Game UUID (pass to `POST /api/analyze` or `POST /api/chat`) |
+| `color` | string | `"white"` or `"black"` — which side the user played |
+| `result` | string | `"win"` \| `"loss"` \| `"draw"` \| `""` (no outcome yet) |
+| `analyzed` | boolean | Whether `/api/analyze` has been run on this game |
 
 ---
 
@@ -926,6 +1008,8 @@ For production, change this to your deployed backend URL.
 | `/api/puzzles/attempt` | POST | Bearer | Submit a puzzle move |
 | `/api/puzzles/coach` | POST | Bearer | Engine coaching for a wrong move (no LLM) |
 | `/api/puzzles/complete` | POST | Bearer | Record puzzle result + schedule next review |
+| `/api/profile` | GET | Bearer | Get user profile (rating, personality) |
+| `/api/games` | GET | Bearer | List game history (most recent first) |
 | `/api/learn` | GET | Bearer | Topic learning content + YouTube videos |
 
 ### WebSocket messages at a glance
