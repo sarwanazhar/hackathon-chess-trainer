@@ -143,8 +143,16 @@ export default function ChatPage() {
           <a href="/chat" className="text-[#acc7ff] transition-colors flex flex-col items-center gap-1">
             <Zap size={20} /><span className="text-[10px]">Chat</span>
           </a>
-          <a href="#" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors flex flex-col items-center gap-1">
+          <a href="/puzzles" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors flex flex-col items-center gap-1">
             <Puzzle size={20} /><span className="text-[10px]">Puzzles</span>
+          </a>
+          <a href="/games" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors flex flex-col items-center gap-1">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span className="text-[10px]">Games</span>
           </a>
         </aside>
 

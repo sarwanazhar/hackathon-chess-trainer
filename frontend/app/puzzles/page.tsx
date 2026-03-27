@@ -2,13 +2,9 @@
 import { Grid, Zap, Puzzle, User, Bot, Terminal, PlusCircle, Send, Wifi, WifiOff, Trophy, Target, Clock, Brain, Shield, Zap as ZapIcon, CheckCircle, XCircle } from 'lucide-react';
 import { UserButton, useAuth, useClerk } from "@clerk/nextjs";
 import { useEffect, useState, useRef } from "react";
-import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
 import ReactMarkdown from 'react-markdown';
-
-import 'chessground/assets/chessground.base.css';
-import 'chessground/assets/chessground.brown.css';
-import 'chessground/assets/chessground.cburnett.css';
+import GameBoard from '@/components/GameBoard';
 
 export default function PuzzlesPage() {
   const { isLoaded, userId } = useAuth();
@@ -25,9 +21,6 @@ export default function PuzzlesPage() {
   const [timerActive, setTimerActive] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const chessInstance = useRef(new Chess());
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chessgroundRef = useRef<any>(null);
-  const [boardLoaded, setBoardLoaded] = useState(false);
 
   // Auth Redirect
   useEffect(() => {
@@ -61,98 +54,6 @@ export default function PuzzlesPage() {
       loadPuzzles();
     }
   }, [userId]);
-
-  // Helper to calculate legal moves for Chessground
-  const getDests = () => {
-    const dests = new Map();
-    chessInstance.current.moves({ verbose: true }).forEach(m => {
-      if (!dests.has(m.from)) dests.set(m.from, []);
-      dests.get(m.from).push(m.to);
-    });
-    return dests;
-  };
-
-  // Initialize Chessground
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const initChessground = async () => {
-      try {
-        // Wait a frame to ensure DOM is ready
-        await new Promise(resolve => setTimeout(resolve, 0));
-        
-        if (!containerRef.current) return;
-
-        chessgroundRef.current = Chessground(containerRef.current, {
-          fen: chessInstance.current.fen(),
-          movable: {
-            free: false,
-            color: 'white',
-            dests: getDests(),
-          },
-          events: {
-            move: (orig, dest) => {
-              const uciMove = `${orig}${dest}`;
-              const move = chessInstance.current.move({ from: orig as any, to: dest as any, promotion: 'q' });
-
-              if (move) {
-                handleMove(uciMove);
-                // Immediately lock board after user move
-                chessgroundRef.current.set({
-                  check: chessInstance.current.inCheck(),
-                  movable: { color: 'none' }
-                });
-              }
-            }
-          }
-        });
-
-        // Mark board as loaded
-        setBoardLoaded(true);
-
-        const handleResize = () => {
-          if (chessgroundRef.current) {
-            chessgroundRef.current.set({
-              fen: chessInstance.current.fen(),
-              movable: {
-                color: isSolving ? (chessInstance.current.turn() === 'w' ? 'white' : 'black') : 'none',
-                dests: getDests(),
-              }
-            });
-          }
-        };
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-          chessgroundRef.current?.destroy();
-          window.removeEventListener('resize', handleResize);
-        };
-      } catch (error) {
-        console.error('Failed to initialize Chessground:', error);
-      }
-    };
-
-    initChessground();
-  }, []);
-
-  // Sync board when puzzle changes
-  useEffect(() => {
-    if (chessgroundRef.current && currentPuzzle) {
-      chessInstance.current.load(currentPuzzle.fen);
-      
-      const turn = chessInstance.current.turn() === 'w' ? 'white' : 'black';
-
-      chessgroundRef.current.set({
-        fen: chessInstance.current.fen(),
-        turnColor: turn,
-        check: chessInstance.current.inCheck(),
-        movable: {
-          color: isSolving ? turn : 'none',
-          dests: getDests(),
-        }
-      });
-    }
-  }, [currentPuzzle, isSolving]);
 
   const loadPuzzles = async () => {
     try {
@@ -323,11 +224,10 @@ export default function PuzzlesPage() {
 
   return (
     <div className="h-screen w-screen bg-[#0D1117] text-[#dfe2eb] font-body overflow-hidden flex flex-col">
-      <header className="h-16 bg-[#181c22] border-b border-[#414754]/15 flex justify-between items-center px-6 z-50 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          <span className="text-xl font-bold tracking-tight">Chess Senpai</span>
-          <div className="h-4 w-px bg-[#414754]/30 ml-2"></div>
-          <span className="text-[#acc7ff] font-bold text-lg">Tactical Puzzles</span>
+      <header className="h-14 bg-[#181c22] border-b border-[#414754]/15 flex justify-between items-center px-4 z-50">
+        <div className="flex items-center gap-3">
+          <Puzzle size={18} className="text-[#acc7ff]" />
+          <span className="font-bold">Chess Senpai</span>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-[#31353c] border border-[#414754]/20">
@@ -339,15 +239,22 @@ export default function PuzzlesPage() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-16 bg-[#0a0e14] border-r border-[#414754]/15 flex flex-col items-center py-6 gap-8 flex-shrink-0">
-          <a href="/dashboard" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors flex flex-col items-center gap-1">
-            <Grid size={20} /><span className="text-[10px]">Board</span>
+        <aside className="w-14 bg-[#0a0e14] border-r border-[#414754]/15 flex flex-col items-center py-4 gap-6">
+          <a href="/dashboard" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors">
+            <Grid size={20} />
           </a>
-          <a href="/chat" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors flex flex-col items-center gap-1">
-            <Zap size={20} /><span className="text-[10px]">Chat</span>
+          <a href="/chat" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors">
+            <Zap size={20} />
           </a>
-          <a href="/puzzles" className="text-[#acc7ff] transition-colors flex flex-col items-center gap-1">
-            <Puzzle size={20} /><span className="text-[10px]">Puzzles</span>
+          <a href="/puzzles" className="text-[#acc7ff] transition-colors">
+            <Puzzle size={20} />
+          </a>
+          <a href="/games" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </a>
         </aside>
 
@@ -409,17 +316,11 @@ export default function PuzzlesPage() {
                       )}
                     </div>
                     <div className="flex justify-center">
-                      <div 
-                        ref={containerRef}
-                        className="w-full max-w-[90vw] max-h-[90vw] sm:max-w-[550px] sm:max-h-[550px] aspect-square border-2 border-[#30363d] rounded-lg p-2 bg-[#2b313a] min-h-[300px] min-w-[300px] relative"
-                      >
-                        {/* Fallback message if Chessground fails to render */}
-                        {!boardLoaded && (
-                          <div className="absolute inset-0 flex items-center justify-center text-[#8b909f] text-sm font-mono opacity-50 pointer-events-none">
-                            Loading chessboard...
-                          </div>
-                        )}
-                      </div>
+                      <GameBoard 
+                        onMove={handleMove}
+                        isPlaying={isSolving}
+                        externalFen={currentPuzzle?.fen}
+                      />
                     </div>
                   </div>
                 </div>

@@ -2,24 +2,25 @@
 
 import { 
   UserButton, 
-  useAuth, 
+  useUser, 
   useClerk 
 } from "@clerk/nextjs";
 import { useEffect } from "react";
 import { Grid, Zap, Puzzle } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { isLoaded, userId } = useAuth();
+  // useUser provides the full user profile (email, name, etc.)
+  const { isLoaded, isSignedIn, user } = useUser();
   const { redirectToSignIn } = useClerk();
 
-  // Redirect to Clerk's OWN hosted sign-in page
+  // Redirect if not logged in
   useEffect(() => {
-    if (isLoaded && !userId) {
+    if (isLoaded && !isSignedIn) {
       redirectToSignIn({
-        signInFallbackRedirectUrl: "/dashboard", // Where they go after login
+        signInFallbackRedirectUrl: "/dashboard",
       });
     }
-  }, [isLoaded, userId, redirectToSignIn]);
+  }, [isLoaded, isSignedIn, redirectToSignIn]);
 
   // 1. LOADING STATE
   if (!isLoaded) {
@@ -35,11 +36,14 @@ export default function DashboardPage() {
     );
   }
 
-  // 2. PROTECTED CONTENT (Only show if userId exists)
-  if (!userId) return null;
+  // 2. PROTECTED CONTENT
+  if (!isSignedIn || !user) return null;
+
+  // Extract the email safely
+  const userEmail = user.primaryEmailAddress?.emailAddress || "Guest";
 
   return (
-    <div className="bg-[#0D1117] text-[#dfe2eb] font-body overflow-hidden">
+    <div className="bg-[#0D1117] text-[#dfe2eb] font-body overflow-hidden min-h-screen">
       {/* Google Fonts */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -51,11 +55,11 @@ export default function DashboardPage() {
       {/* TopAppBar */}
       <header className="fixed top-0 left-0 w-full h-16 bg-[#181c22] border-b border-[#414754]/15 flex justify-between items-center px-6 z-50">
         <div className="flex items-center gap-4">
-          <span className="text-xl font-bold tracking-tight font-headline" style={{ fontFamily: 'Space Grotesk' }}>
+          <span className="text-xl font-bold tracking-tight font-headline">
             Chess Senpai
           </span>
           <div className="h-4 w-px bg-[#414754]/30 ml-2"></div>
-          <span className="text-[#acc7ff] font-headline font-bold text-lg" style={{ fontFamily: 'Space Grotesk' }}>
+          <span className="text-[#acc7ff] font-headline font-bold text-lg">
             Dashboard
           </span>
         </div>
@@ -69,27 +73,29 @@ export default function DashboardPage() {
         <nav className="flex flex-col gap-6 items-center">
           <a className="flex flex-col items-center justify-center text-[#8b909f] hover:text-[#dfe2eb] hover:bg-[#1c2026] transition-all duration-150 ease-out w-full py-2" href="/dashboard">
             <Grid size={20} />
-            <span className="text-[10px] mt-1 font-label" style={{ fontFamily: 'Space Grotesk' }}>Dashboard</span>
+            <span className="text-[10px] mt-1 font-headline">Dashboard</span>
           </a>
           <a className="flex flex-col items-center justify-center text-[#8b909f] hover:text-[#dfe2eb] hover:bg-[#1c2026] transition-all duration-150 ease-out w-full py-2" href="/chat">
             <Zap size={20} />
-            <span className="text-[10px] mt-1 font-label" style={{ fontFamily: 'Space Grotesk' }}>Chat</span>
+            <span className="text-[10px] mt-1 font-headline">Chat</span>
           </a>
-          <a className="flex flex-col items-center justify-center text-[#8b909f] hover:text-[#dfe2eb] hover:bg-[#1c2026] transition-all duration-150 ease-out w-full py-2" href="#">
+          <a className="flex flex-col items-center justify-center text-[#8b909f] hover:text-[#dfe2eb] hover:bg-[#1c2026] transition-all duration-150 ease-out w-full py-2" href="/puzzles">
             <Puzzle size={20} />
-            <span className="text-[10px] mt-1 font-label" style={{ fontFamily: 'Space Grotesk' }}>Puzzles</span>
+            <span className="text-[10px] mt-1 font-headline">Puzzles</span>
+          </a>
+          <a className="flex flex-col items-center justify-center text-[#8b909f] hover:text-[#dfe2eb] hover:bg-[#1c2026] transition-all duration-150 ease-out w-full py-2" href="/games">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="text-[#8b909f]">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span className="text-[10px] mt-1 font-headline">Games</span>
           </a>
         </nav>
-        <div className="mt-auto flex flex-col items-center gap-4">
-          <div className="text-[10px] font-mono text-[#8b909f] uppercase tracking-widest text-center rotate-[-90deg] mb-8" style={{ fontFamily: 'JetBrains Mono' }}>
-            <br />
-          </div>
-        </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="ml-16 mt-16 h-[calc(100vh-64px)] flex flex-col bg-[#0D1117] overflow-hidden items-center">
-        {/* Dashboard Content */}
         <section className="flex-grow flex flex-col w-full max-w-4xl relative">
           <div className="relative z-10 w-full max-w-4xl px-6 py-32 flex flex-col items-center text-center">
             <div className="mb-8 inline-flex items-center gap-3 px-4 py-2" style={{ background: "#0a0e14", border: "1px solid rgba(65,71,84,0.2)", borderRadius: "0.125rem" }}>
@@ -103,10 +109,10 @@ export default function DashboardPage() {
             </h1>
 
             <p className="max-w-2xl font-body text-lg mb-12 leading-relaxed" style={{ color: "#8b909f" }}>
-              Authenticated as <span className="text-white font-mono text-sm">{userId.substring(0, 8)}...</span>. Ready to analyze those blunders?
+              Authenticated as <span className="text-white font-mono text-sm">{userEmail}</span>. Ready to analyze those blunders?
             </p>
 
-            {/* Quick Actions (Mocked for now) */}
+            {/* Quick Actions */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
               {[
                 { title: "Start Training", desc: "Begin your session", color: "#acc7ff", borderColor: "rgba(172,199,255,0.4)" },

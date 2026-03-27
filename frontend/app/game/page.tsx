@@ -155,9 +155,22 @@ export default function GamePage() {
 
             <div className="flex flex-1 overflow-hidden">
                 <aside className="w-14 bg-[#0a0e14] border-r border-[#414754]/15 flex flex-col items-center py-4 gap-6">
-                    <LayoutDashboard size={20} className="text-[#8b909f]" />
-                    <MessageSquare size={20} className="text-[#dfe2eb]" />
-                    <Puzzle size={20} className="text-[#8b909f]" />
+                    <a href="/dashboard" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors">
+                        <LayoutDashboard size={20} />
+                    </a>
+                    <a href="/chat" className="text-[#dfe2eb] transition-colors">
+                        <MessageSquare size={20} />
+                    </a>
+                    <a href="/puzzles" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors">
+                        <Puzzle size={20} />
+                    </a>
+                    <a href="/games" className="text-[#8b909f] hover:text-[#dfe2eb] transition-colors">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                    </a>
                 </aside>
 
                 <main className="flex-1 grid grid-cols-1 lg:grid-cols-[60%_40%] overflow-hidden">

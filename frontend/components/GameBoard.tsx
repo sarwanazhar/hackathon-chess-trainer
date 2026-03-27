@@ -36,9 +36,11 @@ export default function GameBoard({ onMove, isPlaying, externalFen, evaluation }
 
   // Initialize Chessground
   useEffect(() => {
+    // 1. Guard: Ensure the div exists
     if (!containerRef.current) return;
 
-    cg.current = Chessground(containerRef.current, {
+    // 2. Initialize
+    const cgInstance = Chessground(containerRef.current, {
       fen: chess.current.fen(),
       movable: {
         free: false,
@@ -52,34 +54,32 @@ export default function GameBoard({ onMove, isPlaying, externalFen, evaluation }
 
           if (move) {
             onMove(uciMove);
-            // Immediately lock board and update visuals after user move
-            cg.current.set({
-              check: chess.current.inCheck(),
-              movable: { color: 'none' }
-            });
+            if (cgInstance) {
+              cgInstance.set({
+                check: chess.current.inCheck(),
+                movable: { color: undefined }
+              });
+            }
           }
         }
       }
     });
 
-    const handleResize = () => {
-      if (cg.current) {
-        cg.current.set({
-          fen: chess.current.fen(),
-          movable: {
-            color: isPlaying ? (chess.current.turn() === 'w' ? 'white' : 'black') : 'none',
-            dests: getDests(),
-          }
-        });
-      }
-    };
+    cg.current = cgInstance;
+
+    // 3. Handle Resize
+    const handleResize = () => cgInstance.set({ fen: chess.current.fen() });
     window.addEventListener('resize', handleResize);
 
+    // 4. Cleanup
     return () => {
-      cg.current?.destroy();
       window.removeEventListener('resize', handleResize);
+      // Use a small check before destroying to avoid the "removeChild" race condition
+      if (cgInstance) {
+        cgInstance.destroy();
+      }
     };
-  }, [onMove, getDests]);
+  }, []); // Empty dependency array is key here
 
   // Sync board when FEN or Playing state changes
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function GameBoard({ onMove, isPlaying, externalFen, evaluation }
         check: chess.current.inCheck(),
         movable: {
           // If isPlaying is true, allow the current turn's color to move
-          color: isPlaying ? turn : 'none',
+          color: isPlaying ? turn : undefined,
           dests: getDests(),
         }
       });
