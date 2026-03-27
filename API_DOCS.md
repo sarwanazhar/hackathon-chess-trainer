@@ -703,7 +703,7 @@ npm install @clerk/nextjs
 Add to `.env.local` (get your publishable key from the Clerk dashboard — it starts with `pk_test_`):
 ```
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_SECRET_KEY=sk_test_u2Wlb0AV3VrXnz738TR8LjZox2QNSzmdfwDpBntXuN
+CLERK_SECRET_KEY=sk_test_YOUR_CLERK_SECRET_KEY_HERE
 ```
 
 Wrap your app in `app/layout.tsx`:
