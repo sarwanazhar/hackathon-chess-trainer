@@ -67,3 +67,25 @@ body {
     scrollbar-width: none;
   }
 }
+/* Force the board to fill its responsive container */
+.cg-wrap {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Ensure the background board image scales */
+cg-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Make coordinates readable but small on mobile */
+coords {
+  font-size: 8px;
+}
+
+@media (min-width: 640px) {
+  coords {
+    font-size: 12px;
+  }
+}

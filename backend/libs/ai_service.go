@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/gorilla/websocket"
@@ -15,7 +14,11 @@ import (
 	"google.golang.org/api/option"
 )
 
-// AIService handles AI interactions with Gemini API
+type WSRequest struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
 type AIService struct {
 	client *genai.Client
 	model  *genai.GenerativeModel
@@ -24,206 +27,127 @@ type AIService struct {
 func NewAIService() (*AIService, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY is not set in .env or environment")
+		return nil, fmt.Errorf("GEMINI_API_KEY is missing")
 	}
-
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create GenAI client: %w", err)
+		return nil, err
 	}
-
-	// Using Gemma-3 as requested
 	model := client.GenerativeModel("gemma-3-27b-it")
 	model.SetTemperature(0.1)
-
-	return &AIService{
-		client: client,
-		model:  model,
-	}, nil
+	return &AIService{client: client, model: model}, nil
 }
 
-func (ai *AIService) Close() error {
-	return ai.client.Close()
-}
+func (ai *AIService) Close() error { return ai.client.Close() }
 
-// GenerateTacticalInsight sends structured JSON chunks for game analysis
-func (ai *AIService) GenerateTacticalInsight(
-	ctx context.Context,
-	userMoveStr, userPieceName, engineSuggestion, aiResponseMove, aiPieceName string,
-	evalAfter float64,
-	isBlunder bool,
-	ws *websocket.Conn,
-) error {
-	prompt := fmt.Sprintf(`### DATA ###
-You moved: %s (%s)
-Engine Choice: %s
-My Response: %s (%s)
-Eval: %.1f
-
-### TASK ###
-You are a blunt Grandmaster Coach. 
-1. If Eval < -1.0, you MUST roast the user for losing material or position.
-2. Address me as "You". 
-3. Explain what's happening in the position after my move.
-4. Describe the current state and key features of the position.
-5. Max 15 words. Be direct. No pleasantries.`,
-		userMoveStr, userPieceName, engineSuggestion, aiResponseMove, aiPieceName, evalAfter)
-
-	log.Println("--- Generating Tactical Insight ---")
-
-	streamCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-
-	iter := ai.model.GenerateContentStream(streamCtx, genai.Text(prompt))
+func (ai *AIService) HandleWebSocketConnection(ws *websocket.Conn, chessEngine *ChessEngine) error {
+	game := chess.NewGame()
 	for {
-		resp, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to generate content: %w", err)
+		var req WSRequest
+		if err := ws.ReadJSON(&req); err != nil {
+			log.Printf("WS Read Error: %v", err)
+			return err
 		}
 
-		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
-			for _, part := range resp.Candidates[0].Content.Parts {
-				chunk := fmt.Sprintf("%v", part)
+		if req.Type == "move" {
+			userMoveStr := strings.TrimSpace(req.Content)
+			engineSuggestion, evalBefore := chessEngine.GetBestMoveAndEval(game)
 
-				// Send as JSON instead of raw string
-				msgType := "ai_response"
-				if isBlunder {
-					msgType = "blunder_insight"
+			var userMove *chess.Move
+			pieceName := "piece"
+			for _, m := range game.ValidMoves() {
+				if m.String() == userMoveStr {
+					userMove = m
+					p := game.Position().Board().Piece(m.S1())
+					pieceName = GetPieceName(p)
+					break
 				}
-
-				ws.WriteJSON(map[string]interface{}{
-					"type":    msgType,
-					"content": chunk,
-				})
 			}
+
+			if userMove == nil {
+				ws.WriteJSON(map[string]interface{}{"type": "error", "content": "Invalid Move"})
+				continue
+			}
+
+			// 1. Apply User Move
+			game.Move(userMove)
+
+			// 2. Get AI Response
+			aiResponseMove, evalAfter := chessEngine.GetBestMoveAndEval(game)
+			isBlunder := IsBlunder(evalBefore, evalAfter)
+
+			// 3. Apply AI Move to the internal game state
+			aiPieceName := "piece"
+			for _, m := range game.ValidMoves() {
+				if m.String() == aiResponseMove {
+					p := game.Position().Board().Piece(m.S1())
+					aiPieceName = GetPieceName(p)
+					game.Move(m)
+					break
+				}
+			}
+
+			// 4. Send the FINAL Board state (After both moves)
+			// This ensures the board is ready for White's next turn immediately
+			ws.WriteJSON(map[string]interface{}{
+				"type": "board_update",
+				"move": aiResponseMove,
+				"fen":  game.FEN(),
+			})
+
+			// 5. Run tactical roast in background
+			go ai.GenerateTacticalInsight(context.Background(), userMoveStr, pieceName, engineSuggestion, aiResponseMove, aiPieceName, evalAfter, isBlunder, ws)
+
+		} else if req.Type == "chat_message" {
+			go ai.GenerateChatResponse(context.Background(), req.Content, ws)
 		}
 	}
-	return nil
 }
 
 func (ai *AIService) HandleChatWebSocketConnection(ws *websocket.Conn) error {
-	defer ws.Close()
-
 	for {
-		_, msg, err := ws.ReadMessage()
-		if err != nil {
-			return fmt.Errorf("WebSocket read error: %w", err)
+		var req WSRequest
+		if err := ws.ReadJSON(&req); err != nil {
+			return err
 		}
-
-		userMessage := strings.TrimSpace(string(msg))
-
-		if err := ai.GenerateChatResponse(context.Background(), userMessage, ws); err != nil {
-			log.Printf("Failed to generate chat response: %v", err)
-			ws.WriteJSON(map[string]interface{}{
-				"type":    "error",
-				"content": "Failed to generate response",
-			})
-			continue
+		if req.Type == "chat_message" {
+			go ai.GenerateChatResponse(context.Background(), req.Content, ws)
 		}
 	}
 }
 
-func (ai *AIService) GenerateChatResponse(ctx context.Context, userMessage string, ws *websocket.Conn) error {
-	prompt := fmt.Sprintf(`You are a friendly and knowledgeable chess AI assistant. 
-        Answer the user's question about chess in a helpful and engaging way.
-        User message: "%s"`, userMessage)
-
-	log.Printf("Generating chat response for: %s", userMessage)
-
-	streamCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-
-	iter := ai.model.GenerateContentStream(streamCtx, genai.Text(prompt))
+func (ai *AIService) GenerateTacticalInsight(ctx context.Context, userMove, userPiece, suggest, aiMove, aiPiece string, eval float64, blunder bool, ws *websocket.Conn) error {
+	prompt := fmt.Sprintf("GM Coach Roast: You moved %s (%s). Engine wanted %s. I played %s. Eval: %.1f. Be blunt, max 15 words.", userMove, userPiece, suggest, aiMove, aiPiece, eval)
+	iter := ai.model.GenerateContentStream(ctx, genai.Text(prompt))
 	for {
 		resp, err := iter.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("failed to generate content: %w", err)
+			return err
 		}
-
-		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
-			for _, part := range resp.Candidates[0].Content.Parts {
-				chunk := fmt.Sprintf("%v", part)
-
-				// Send as JSON
-				ws.WriteJSON(map[string]interface{}{
-					"type":    "ai_response",
-					"content": chunk,
-				})
-			}
+		for _, part := range resp.Candidates[0].Content.Parts {
+			ws.WriteJSON(map[string]interface{}{"type": "ai_response", "content": fmt.Sprintf("%v", part)})
 		}
 	}
 	return nil
 }
 
-func (ai *AIService) HandleWebSocketConnection(
-	ws *websocket.Conn,
-	chessEngine *ChessEngine,
-) error {
-	defer ws.Close()
-	game := chess.NewGame()
-
+func (ai *AIService) GenerateChatResponse(ctx context.Context, msg string, ws *websocket.Conn) error {
+	iter := ai.model.GenerateContentStream(ctx, genai.Text("Chess Coach: "+msg))
 	for {
-		_, msg, err := ws.ReadMessage()
+		resp, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
 		if err != nil {
-			return fmt.Errorf("WebSocket read error: %w", err)
+			return err
 		}
-		userMoveStr := strings.TrimSpace(string(msg))
-
-		engineSuggestion, evalBefore := chessEngine.GetBestMoveAndEval(game)
-
-		var userMove *chess.Move
-		pieceName := "piece"
-		for _, m := range game.ValidMoves() {
-			if m.String() == userMoveStr {
-				userMove = m
-				p := game.Position().Board().Piece(m.S1())
-				pieceName = GetPieceName(p)
-				break
-			}
-		}
-
-		if userMove == nil {
-			ws.WriteJSON(map[string]interface{}{
-				"type":    "error",
-				"content": "Invalid Move",
-			})
-			continue
-		}
-
-		game.Move(userMove)
-		aiResponseMove, evalAfter := chessEngine.GetBestMoveAndEval(game)
-		isBlunder := IsBlunder(evalBefore, evalAfter)
-
-		aiPieceName := "piece"
-		for _, m := range game.ValidMoves() {
-			if m.String() == aiResponseMove {
-				p := game.Position().Board().Piece(m.S1())
-				aiPieceName = GetPieceName(p)
-				game.Move(m)
-				break
-			}
-		}
-
-		// Push Board Update as JSON
-		ws.WriteJSON(map[string]interface{}{
-			"type": "board_update",
-			"move": aiResponseMove,
-			"fen":  game.FEN(),
-		})
-
-		if err := ai.GenerateTacticalInsight(
-			context.Background(),
-			userMoveStr, pieceName, engineSuggestion, aiResponseMove, aiPieceName,
-			evalAfter, isBlunder, ws,
-		); err != nil {
-			log.Printf("Failed to generate tactical insight: %v", err)
+		for _, part := range resp.Candidates[0].Content.Parts {
+			ws.WriteJSON(map[string]interface{}{"type": "ai_response", "content": fmt.Sprintf("%v", part)})
 		}
 	}
+	return nil
 }
