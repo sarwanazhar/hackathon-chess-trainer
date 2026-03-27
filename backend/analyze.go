@@ -47,7 +47,6 @@ func HandleAnalyze(c *gin.Context) {
 	var uciMoves []string
 
 	if req.PGN != "" {
-		// Parse PGN directly — no DB lookup needed.
 		pgn, err := chess.PGN(strings.NewReader(req.PGN))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid PGN: " + err.Error()})
@@ -58,14 +57,12 @@ func HandleAnalyze(c *gin.Context) {
 			uciMoves = append(uciMoves, m.String())
 		}
 	} else if req.GameID != "" {
-		// Fetch game from DB.
 		data, err := sb.dbRequest("GET", "games", nil,
 			"id=eq."+req.GameID+"&user_id=eq."+userID+"&select=moves,pgn")
 		if err != nil || len(data) < 3 {
 			c.JSON(http.StatusNotFound, gin.H{"error": "game not found"})
 			return
 		}
-
 		var rows []struct {
 			Moves []string `json:"moves"`
 			PGN   string   `json:"pgn"`
@@ -97,6 +94,21 @@ func HandleAnalyze(c *gin.Context) {
 	defer eng.Close()
 	eng.Run(uci.CmdUCI, uci.CmdIsReady)
 
+	// Initialize Gemini client once for the whole analysis.
+	var aiModel *genai.GenerativeModel
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	analysisCtx, analysisCancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer analysisCancel()
+	if apiKey != "" {
+		aiClient, err := genai.NewClient(analysisCtx, option.WithAPIKey(apiKey))
+		if err == nil {
+			defer aiClient.Close()
+			m := aiClient.GenerativeModel("gemma-3-27b-it")
+			m.SetTemperature(0.2)
+			aiModel = m
+		}
+	}
+
 	// Replay and analyse each move.
 	game := chess.NewGame()
 	var analyses []MoveAnalysis
@@ -121,16 +133,36 @@ func HandleAnalyze(c *gin.Context) {
 		result := GetAnalysis(eng, game, 12)
 		evalNow := result.Eval
 
-		// Drop from perspective of the player who just moved.
-		// Even half-moves = White moved, odd = Black moved.
 		drop := 0.0
-		if i%2 == 0 { // White's move
+		if i%2 == 0 {
 			drop = prevEval - evalNow
-		} else { // Black's move
+		} else {
 			drop = evalNow - prevEval
 		}
 
 		grade := moveGrade(drop)
+
+		// Generate per-move comment for blunders and mistakes.
+		var comment string
+		if aiModel != nil && (grade == "blunder" || grade == "mistake") {
+			bestSAN := result.BestSAN
+			if bestSAN == "" {
+				bestSAN = result.BestMove
+			}
+			prompt := fmt.Sprintf(
+				"Chess move %s was a %s (%.1f pawn drop). Best was %s. In one sentence, explain what went wrong.",
+				moveSAN, grade, drop, bestSAN,
+			)
+			commentCtx, commentCancel := context.WithTimeout(context.Background(), 8*time.Second)
+			resp, err := aiModel.GenerateContent(commentCtx, genai.Text(prompt))
+			commentCancel()
+			if err == nil && len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+				for _, p := range resp.Candidates[0].Content.Parts {
+					comment = fmt.Sprintf("%v", p)
+					break
+				}
+			}
+		}
 
 		if grade == "blunder" || grade == "mistake" {
 			theme := detectTheme(i)
@@ -147,9 +179,10 @@ func HandleAnalyze(c *gin.Context) {
 		}
 
 		analyses = append(analyses, MoveAnalysis{
-			Move:  moveSAN,
-			Eval:  evalNow,
-			Grade: grade,
+			Move:    moveSAN,
+			Eval:    evalNow,
+			Grade:   grade,
+			Comment: comment,
 		})
 
 		prevEval = evalNow
@@ -161,45 +194,32 @@ func HandleAnalyze(c *gin.Context) {
 		weakAreas = append(weakAreas, theme)
 	}
 
-	// Generate a summary with Gemini.
+	// Generate summary.
 	summary := "Analysis complete."
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
-		aiClient, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
-		if err == nil {
-			defer aiClient.Close()
-			model := aiClient.GenerativeModel("gemma-3-27b-it")
-			model.SetTemperature(0.2)
-
-			blunderCount := 0
-			for _, a := range analyses {
-				if a.Grade == "blunder" || a.Grade == "mistake" {
-					blunderCount++
-				}
+	if aiModel != nil {
+		blunderCount := 0
+		for _, a := range analyses {
+			if a.Grade == "blunder" || a.Grade == "mistake" {
+				blunderCount++
 			}
-
-			prompt := fmt.Sprintf(
-				"Chess game: %d moves, %d mistakes/blunders, weak areas: %v. "+
-					"Write a 2-sentence coaching summary. Be direct and specific.",
-				len(analyses), blunderCount, weakAreas,
-			)
-			resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-			if err == nil && len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
-				var parts []string
-				for _, p := range resp.Candidates[0].Content.Parts {
-					parts = append(parts, fmt.Sprintf("%v", p))
-				}
-				if len(parts) > 0 {
-					summary = parts[0]
-				}
+		}
+		prompt := fmt.Sprintf(
+			"Chess game: %d moves, %d mistakes/blunders, weak areas: %v. "+
+				"Write a 2-sentence coaching summary. Be direct and specific.",
+			len(analyses), blunderCount, weakAreas,
+		)
+		resp, err := aiModel.GenerateContent(analysisCtx, genai.Text(prompt))
+		if err == nil && len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+			var parts []string
+			for _, p := range resp.Candidates[0].Content.Parts {
+				parts = append(parts, fmt.Sprintf("%v", p))
+			}
+			if len(parts) > 0 {
+				summary = parts[0]
 			}
 		}
 	}
 
-	// Mark game as analysed.
 	if req.GameID != "" {
 		sb.UpdateGame(req.GameID, map[string]interface{}{"analyzed": true})
 	}
