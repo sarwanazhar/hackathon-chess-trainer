@@ -11,7 +11,6 @@ import (
 	clerkjwt "github.com/clerk/clerk-sdk-go/v2/jwt"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/joho/godotenv"
 	"github.com/notnil/chess/uci"
 )
 
@@ -29,8 +28,13 @@ var (
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("Note: .env file not found, using system environment variables")
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
+
+	// Get port from environment or default to 8080
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
 
 	clerk.SetKey(os.Getenv("CLERK_SECRET_KEY"))
@@ -86,8 +90,8 @@ func main() {
 	api.GET("/learn", HandleLearn)
 	api.GET("/games", HandleGetGames)
 
-	log.Println("Chess Trainer Backend starting on :8080...")
-	if err := r.Run(":8080"); err != nil {
+	log.Printf("Chess Trainer Backend starting on :%s...", port)
+	if err := r.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }

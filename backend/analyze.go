@@ -36,6 +36,9 @@ type AnalyzeResponse struct {
 
 // HandleAnalyze replays a saved game, grades every move, and saves blunders.
 func HandleAnalyze(c *gin.Context) {
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
+
 	var req AnalyzeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -108,7 +111,6 @@ func HandleAnalyze(c *gin.Context) {
 			aiModel = m
 		}
 	}
-
 	// Replay and analyse each move.
 	game := chess.NewGame()
 	var analyses []MoveAnalysis

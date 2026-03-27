@@ -20,6 +20,9 @@ type ChatRequest struct {
 
 // HandleChat streams a coaching response via SSE (text/event-stream).
 func HandleChat(c *gin.Context) {
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
+
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -36,7 +39,6 @@ func HandleChat(c *gin.Context) {
 		return
 	}
 	defer aiClient.Close()
-
 	model := aiClient.GenerativeModel("gemma-3-27b-it")
 	model.SetTemperature(0.3)
 

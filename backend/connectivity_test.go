@@ -15,7 +15,9 @@ import (
 
 func setupTestClient(t *testing.T) *SupabaseClient {
 	t.Helper()
-	godotenv.Load(".env")
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
+
 	sb := NewSupabaseClient()
 	if sb.URL == "" {
 		t.Fatal("SUPABASE_URL not set in .env")

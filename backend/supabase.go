@@ -18,6 +18,9 @@ type SupabaseClient struct {
 }
 
 func NewSupabaseClient() *SupabaseClient {
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
+
 	return &SupabaseClient{
 		URL:        os.Getenv("SUPABASE_URL"),
 		ServiceKey: os.Getenv("SUPABASE_SERVICE_KEY"),

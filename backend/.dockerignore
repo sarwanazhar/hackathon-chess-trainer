@@ -1,0 +1,14 @@
+# Ignore the heavy local stockfish folder
+stockfish/
+*.exe
+*.bin
+
+# Ignore local environment files
+.env
+*.sql
+
+# Ignore git and IDE junk
+.git
+.gitignore
+.vscode/
+node_modules/
