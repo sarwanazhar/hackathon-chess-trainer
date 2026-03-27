@@ -3,7 +3,7 @@ import { getToken } from '@clerk/nextjs';
 /**
  * Configuration for API requests
  */
-const API_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 /**
  * Creates a fetch request with automatic Clerk authentication
@@ -159,10 +159,10 @@ export async function createAuthenticatedWebSocket(
 
   const ws = new WebSocket(wsUrl);
 
-  ws.onopen = onOpen;
-  ws.onmessage = onMessage;
-  ws.onerror = onError;
-  ws.onclose = onClose;
+  ws.onopen = onOpen || (() => {});
+  ws.onmessage = onMessage || (() => {});
+  ws.onerror = onError || (() => {});
+  ws.onclose = onClose || (() => {});
 
   return ws;
 }

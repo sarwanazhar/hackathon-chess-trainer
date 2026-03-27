@@ -29,24 +29,27 @@ export default function GamePage() {
 
         try {
             const wsConnection = await createAuthenticatedWebSocket(
-                '/game',
+                '/ws/game',
                 () => {
                     console.log("✅ WebSocket Connected");
                     setIsConnected(true);
+                    // Send new_game message to start the game
+                    wsConnection.send(JSON.stringify({ type: 'new_game', color: 'white' }));
                 },
                 (event) => {
                     try {
                         const data = JSON.parse(event.data);
 
-                        // 1. Reset on explicit board updates
-                        if (data.type === 'board_update' || data.fen) {
+                        // Handle board updates
+                        if (data.type === 'board_update') {
                             isStreamingRef.current = false; 
-                            if (data.fen) setFen(data.fen);
+                            setFen(data.fen);
                             if (data.eval !== undefined) setEvaluation(data.eval);
                             setIsPlaying(true); 
                         }
 
-                        if (data.type === 'ai_response' || data.type === 'blunder_insight') {
+                        // Handle coaching chunks
+                        if (data.type === 'coach_chunk') {
                             const now = Date.now();
                             const timeSinceLastChunk = now - lastChunkTimeRef.current;
                             lastChunkTimeRef.current = now;
@@ -54,24 +57,44 @@ export default function GamePage() {
                             setMessages(prev => {
                                 const lastMsg = prev[prev.length - 1];
                                 
-                                // 2. Time-Gap Logic: If > 500ms since last data, start a new bubble
+                                // Time-Gap Logic: If > 500ms since last data, start a new bubble
                                 const isNewBurst = timeSinceLastChunk > 500;
                                 
                                 if (isNewBurst || !isStreamingRef.current || !lastMsg || lastMsg.type !== 'ai') {
                                     isStreamingRef.current = true;
-                                    return [...prev, { type: 'ai', content: data.content || "" }];
+                                    return [...prev, { type: 'ai', content: data.text || "" }];
                                 }
 
-                                // 3. Normal concatenation for active streams
+                                // Normal concatenation for active streams
                                 const updated = [...prev];
                                 updated[updated.length - 1] = { 
                                     ...lastMsg, 
-                                    content: lastMsg.content + (data.content || "") 
+                                    content: lastMsg.content + (data.text || "") 
                                 };
                                 return updated;
                             });
                         }
+
+                        // Handle coaching done
+                        if (data.type === 'coach_done') {
+                            // Coaching stream finished
+                        }
+
+                        // Handle game over
+                        if (data.type === 'game_over') {
+                            setIsPlaying(false);
+                            setMessages(prev => [...prev, { 
+                                type: 'ai', 
+                                content: `Game over! Result: ${data.result} - Winner: ${data.winner || 'Draw'}` 
+                            }]);
+                        }
+
+                        // Handle errors
+                        if (data.type === 'error') {
+                            setMessages(prev => [...prev, { type: 'ai', content: `Error: ${data.message}` }]);
+                        }
                     } catch (e) { 
+                        console.error('Error parsing WebSocket message:', e);
                         setIsPlaying(true); 
                     }
                 },
@@ -94,7 +117,7 @@ export default function GamePage() {
         const socket = wsRef.current;
         isStreamingRef.current = false; // Reset bubble on new move
         if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'move', content: move }));
+            socket.send(JSON.stringify({ type: 'move', move: move }));
             setIsPlaying(false);
         } else {
             pendingMoveRef.current = move;

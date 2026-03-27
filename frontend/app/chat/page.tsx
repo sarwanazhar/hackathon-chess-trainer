@@ -2,16 +2,15 @@
 import { Grid, Zap, Puzzle, User, Bot, Terminal, PlusCircle, Send, Wifi, WifiOff } from 'lucide-react';
 import { UserButton, useAuth, useClerk } from "@clerk/nextjs";
 import { useEffect, useState, useRef } from "react";
-import { createAuthenticatedWebSocket } from "@/lib/api";
+import { get, post } from "@/lib/api";
 import ReactMarkdown from 'react-markdown';
 
 export default function ChatPage() {
   const { isLoaded, userId } = useAuth();
   const { redirectToSignIn } = useClerk();
-  const [ws, setWs] = useState<WebSocket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [messages, setMessages] = useState<Array<{ type: 'user' | 'ai', content: string }>>([]);
   const [inputValue, setInputValue] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auth Redirect
@@ -21,63 +20,91 @@ export default function ChatPage() {
     }
   }, [isLoaded, userId, redirectToSignIn]);
 
-  // WebSocket Connection
-  useEffect(() => {
-    if (isLoaded && userId) {
-      connectWebSocket();
-    }
-    return () => ws?.close();
-  }, [isLoaded, userId]);
-
   // Auto-scroll logic
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const connectWebSocket = async () => {
+  const sendMessage = async () => {
+    if (!inputValue.trim()) return;
+
+    // Add user message
+    setMessages(prev => [...prev, { type: 'user', content: inputValue }]);
+    setInputValue('');
+
     try {
-      const wsConnection = await createAuthenticatedWebSocket(
-        '/chat',
-        () => setIsConnected(true),
-        (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type === 'ai_response' || data.type === 'blunder_insight') {
+      // Get token first
+      const token = await getToken();
+      if (!token) {
+        throw new Error('Authentication token not available');
+      }
+
+      // Use the REST API for chat with SSE streaming
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ message: inputValue })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Set streaming state while processing response
+      setIsStreaming(true);
+
+      // Handle SSE streaming response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader!.read();
+        if (done) break;
+        
+        const text = decoder.decode(value);
+        const lines = text.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const payload = line.slice(6);
+            if (payload === '[DONE]') {
+              setIsStreaming(false);
+              break;
+            }
+            try {
+              const { chunk } = JSON.parse(payload);
               setMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
                 if (lastMsg && lastMsg.type === 'ai') {
                   const updatedMessages = [...prev];
                   updatedMessages[updatedMessages.length - 1] = {
                     ...lastMsg,
-                    content: lastMsg.content + data.content
+                    content: lastMsg.content + chunk
                   };
                   return updatedMessages;
                 }
-                return [...prev, { type: 'ai', content: data.content }];
+                return [...prev, { type: 'ai', content: chunk }];
               });
+            } catch (e) {
+              console.error('Error parsing chat chunk:', e);
             }
-          } catch (error) {
-            console.error('Error parsing JSON:', error);
           }
-        },
-        () => setIsConnected(false),
-        () => {
-          setIsConnected(false);
-          setTimeout(() => { if (isLoaded && userId) connectWebSocket(); }, 3000);
         }
-      );
-      setWs(wsConnection);
+      }
     } catch (error) {
-      setIsConnected(false);
+      console.error('Chat error:', error);
+      setMessages(prev => [...prev, { type: 'ai', content: 'Sorry, I encountered an error. Please try again.' }]);
+      setIsStreaming(false);
     }
   };
 
-  const sendMessage = () => {
-    if (inputValue.trim() && ws && isConnected) {
-      setMessages(prev => [...prev, { type: 'user', content: inputValue }]);
-      ws.send(JSON.stringify({ type: 'chat_message', content: inputValue }));
-      setInputValue('');
-    }
+  // Helper function to get Clerk token
+  const getToken = async () => {
+    const { getToken } = await import('@clerk/nextjs');
+    return await getToken({ template: 'supabase' });
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -104,12 +131,6 @@ export default function ChatPage() {
           <span className="text-[#acc7ff] font-bold text-lg">Sensei Chat</span>
         </div>
         <div className="flex items-center gap-4">
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs ${
-            isConnected ? 'bg-[#7bdb80]/10 border-[#7bdb80]/30 border' : 'bg-[#ff6b6b]/10 border-[#ff6b6b]/30 border'
-          }`}>
-            {isConnected ? <Wifi size={14} className="text-[#7bdb80]" /> : <WifiOff size={14} className="text-[#ff6b6b]" />}
-            <span className={isConnected ? "text-[#7bdb80]" : "text-[#ff6b6b]"}>{isConnected ? 'Connected' : 'Connecting...'}</span>
-          </div>
           <UserButton afterSwitchSessionUrl="/chat" />
         </div>
       </header>
@@ -178,18 +199,18 @@ export default function ChatPage() {
                 <button className="p-2 text-[#8b909f] hover:text-[#acc7ff] transition-colors"><PlusCircle size={20} /></button>
                 <input 
                   className="flex-grow bg-transparent border-none focus:ring-0 text-sm text-[#dfe2eb] px-3 placeholder:text-[#8b909f]/50" 
-                  placeholder={isConnected ? "Ask Sensei about your game..." : "Reconnecting..."} 
+                  placeholder={isStreaming ? "Sensei is responding..." : "Ask Sensei about your game..."} 
                   type="text"
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyPress}
-                  disabled={!isConnected}
+                  disabled={isStreaming}
                 />
                 <button 
                   onClick={sendMessage}
-                  disabled={!isConnected || !inputValue.trim()}
+                  disabled={isStreaming || !inputValue.trim()}
                   className={`p-2 rounded-full transition-all flex items-center justify-center ${
-                    isConnected ? 'bg-[#acc7ff] text-[#0D1117] hover:scale-105' : 'bg-[#31353c] text-[#8b909f]'
+                    !isStreaming && inputValue.trim() ? 'bg-[#acc7ff] text-[#0D1117] hover:scale-105' : 'bg-[#31353c] text-[#8b909f]'
                   }`}
                 >
                   <Send size={18} />
