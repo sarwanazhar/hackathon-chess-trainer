@@ -214,6 +214,10 @@ func HandleGame(c *gin.Context, userID string) {
 			"pgn":    session.Game.String(),
 			"result": result,
 		})
+		// Update Elo after a decisive result.
+		if result == "win" || result == "loss" || result == "draw" {
+			go sb.UpdateRating(session.UserID, result)
+		}
 	}
 }
 

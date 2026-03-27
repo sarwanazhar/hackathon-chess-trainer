@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"time"
@@ -229,4 +230,81 @@ func (s *SupabaseClient) GetProfile(userID string) (*Profile, error) {
 		return nil, fmt.Errorf("profile not found for user %s", userID)
 	}
 	return &result[0], nil
+}
+
+// GameSummary is returned by GET /api/games.
+type GameSummary struct {
+	ID       string `json:"id"`
+	Color    string `json:"color"`
+	Result   string `json:"result"`
+	Analyzed bool   `json:"analyzed"`
+}
+
+// GetGames returns the user's game history, most recent first.
+func (s *SupabaseClient) GetGames(userID string, limit int) ([]GameSummary, error) {
+	q := fmt.Sprintf("user_id=eq.%s&select=id,color,result,analyzed&order=created_at.desc&limit=%d",
+		userID, limit)
+	data, err := s.dbRequest("GET", "games", nil, q)
+	if err != nil {
+		return nil, err
+	}
+	var games []GameSummary
+	if err := json.Unmarshal(data, &games); err != nil {
+		return nil, err
+	}
+	return games, nil
+}
+
+// newElo calculates the updated Elo rating.
+// opponentRating: 1500 (fixed AI strength reference).
+// result: 1.0 = win, 0.5 = draw, 0.0 = loss.
+func newElo(playerRating, opponentRating int, result float64) int {
+	const K = 32
+	expected := 1.0 / (1.0 + math.Pow(10, float64(opponentRating-playerRating)/400.0))
+	return playerRating + int(math.Round(K*(result-expected)))
+}
+
+// UpdateRating reads the current rating and writes the new one after a game result.
+// gameResult: "win", "loss", or "draw".
+func (s *SupabaseClient) UpdateRating(userID, gameResult string) error {
+	profile, err := s.GetProfile(userID)
+	if err != nil {
+		return err
+	}
+	var score float64
+	switch gameResult {
+	case "win":
+		score = 1.0
+	case "draw":
+		score = 0.5
+	default:
+		score = 0.0
+	}
+	const aiRating = 1500
+	updated := newElo(profile.Rating, aiRating, score)
+	_, err = s.dbRequest("PATCH", "profiles",
+		map[string]interface{}{"rating": updated},
+		"user_id=eq."+userID,
+	)
+	return err
+}
+
+// IncrementAttemptCount increments the attempt counter on a missed_moves row.
+func (s *SupabaseClient) IncrementAttemptCount(puzzleID string) error {
+	data, err := s.dbRequest("GET", "missed_moves", nil,
+		"id=eq."+puzzleID+"&select=attempt_count")
+	if err != nil {
+		return err
+	}
+	var rows []struct {
+		AttemptCount int `json:"attempt_count"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil // puzzle not in missed_moves (general pool) — skip
+	}
+	_, err = s.dbRequest("PATCH", "missed_moves",
+		map[string]interface{}{"attempt_count": rows[0].AttemptCount + 1},
+		"id=eq."+puzzleID,
+	)
+	return err
 }
