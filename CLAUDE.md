@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AI-powered chess training backend. The core design prevents LLM hallucination by grounding all AI responses in verified Stockfish engine analysis — Gemini only explains facts that Stockfish has already verified, never inventing them.
 
-**Stack:** Go backend, Gin HTTP framework, Gorilla WebSocket, Stockfish chess engine, Google Gemini API, Supabase (PostgreSQL only), Clerk (Auth), YouTube Data API v3.
+**Stack:** Go backend, Gin HTTP framework, Gorilla WebSocket, Stockfish chess engine, Google AI API (`gemma-3-27b-it` model via `google.golang.org/api`), Supabase (PostgreSQL only), Clerk (Auth), YouTube Data API v3.
 
 ## Commands
 
@@ -148,7 +148,7 @@ All set in `backend/.env`.
 - **Streaming**: WebSocket uses `json.Marshal` + `WriteMessage`; REST endpoints use SSE (`fmt.Fprintf(c.Writer, "data: ...\n\n")`); Gemini uses its iterator streaming API.
 - **Personality modes**: "supportive Grandmaster" (default, `mentor`) or "roast comedian" (`roast`) — controlled per-user via `profiles.personality` and `set_personality` WebSocket messages.
 - **Skill level**: `beginner` | `intermediate` | `advanced` — set via `set_level` WebSocket message, affects coaching depth/vocabulary in the situation report.
-- **Move grading thresholds** (in `stockfish.go`): blunder > 1.5 pawns drop, mistake > 0.5, inaccuracy > 0.2.
+- **Move grading thresholds** (in `stockfish.go`): blunder > 1.5 pawns drop, mistake > 0.8, inaccuracy > 0.3.
 - **CORS**: all origins accepted (hackathon scope).
 - **Puzzle coaching** (`puzzle_play.go`): engine-only, no LLM — deterministic and rate-limit-free. The `/api/puzzles/coach` endpoint uses Stockfish + board analysis directly.
 - **Video cache**: YouTube results stored in `videos` table. `openings.go` checks cache before hitting the YouTube API.

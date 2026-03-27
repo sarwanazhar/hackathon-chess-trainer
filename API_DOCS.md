@@ -252,7 +252,7 @@ Sent when an operation fails (invalid move, no game started, etc.).
 ---
 
 #### `debug_prompt`
-Transparency feature — the exact grounded prompt sent to Gemini, emitted before each coaching stream starts.
+Transparency feature — the exact grounded prompt sent to Gemini, emitted **before every coaching stream** (fires on every `move`, not just blunders).
 
 ```json
 {
@@ -666,15 +666,13 @@ console.log(move.san); // "e4"
 
 ### Evaluation Scale
 
-```
-< -3.0   Black is winning decisively
--3.0 to -1.5  Black is winning
--1.5 to -0.5  Black is better
--0.5 to +0.5  Equal
-+0.5 to +1.5  White is better
-+1.5 to +3.0  White is winning
-> +3.0   White is winning decisively
-```
+| Eval range | Label |
+|------------|-------|
+| > +3.0 | White winning |
+| +0.5 to +3.0 | White better |
+| -0.5 to +0.5 | Equal |
+| -3.0 to -0.5 | Black better |
+| < -3.0 | Black winning |
 
 Positive = White advantage. During a game where the user plays Black, a high positive eval means the user is losing.
 
