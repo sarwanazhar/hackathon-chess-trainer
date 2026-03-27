@@ -82,9 +82,17 @@ type WSErrorMsg struct {
 	Message string `json:"message"`
 }
 
-func sendJSON(ws *websocket.Conn, v interface{}) {
-	b, _ := json.Marshal(v)
-	ws.WriteMessage(websocket.TextMessage, b)
+func sendJSON(ws *websocket.Conn, v interface{}) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		log.Printf("sendJSON marshal error: %v", err)
+		return err
+	}
+	if err := ws.WriteMessage(websocket.TextMessage, b); err != nil {
+		log.Printf("sendJSON write error: %v", err)
+		return err
+	}
+	return nil
 }
 
 // HandleGame is the WebSocket handler for /ws/game.
@@ -170,14 +178,18 @@ func HandleGame(c *gin.Context, userID string) {
 				sendJSON(ws, WSErrorMsg{Type: "error", Message: "No game started"})
 				continue
 			}
-			handleMove(ws, ctx, model, session, msg.Move)
+			if err := handleMove(ws, ctx, model, session, msg.Move); err != nil {
+			return
+		}
 
 		case "hint":
 			if session.Game == nil {
 				sendJSON(ws, WSErrorMsg{Type: "error", Message: "No game started"})
 				continue
 			}
-			handleHint(ws, ctx, model, session)
+			if err := handleHint(ws, ctx, model, session); err != nil {
+			return
+		}
 
 		case "set_personality":
 			session.Personality = msg.Mode
@@ -235,12 +247,12 @@ func makeAIFirstMove(ws *websocket.Conn, session *GameSession) {
 	})
 }
 
-func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.GenerativeModel, session *GameSession, moveStr string) {
+func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.GenerativeModel, session *GameSession, moveStr string) error {
 	game := session.Game
 
 	// Eval BEFORE the user's move → what the user SHOULD have played.
 	preMovefen := game.Position().String()
-	beforeResult := GetAnalysis(session.Eng, game, 15)
+	beforeResult := GetAnalysis(session.Eng, game, 12)
 
 	// Validate move.
 	var userMove *chess.Move
@@ -251,8 +263,7 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		}
 	}
 	if userMove == nil {
-		sendJSON(ws, WSErrorMsg{Type: "error", Message: "Invalid move"})
-		return
+		return sendJSON(ws, WSErrorMsg{Type: "error", Message: "Invalid move"})
 	}
 
 	userMoveSAN := chess.AlgebraicNotation{}.Encode(game.Position(), userMove)
@@ -262,12 +273,11 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 	// Check game over after user move.
 	if game.Outcome() != chess.NoOutcome {
 		result, winner := outcomeStrings(game.Outcome(), game.Method())
-		sendJSON(ws, GameOverMsg{Type: "game_over", Result: result, Winner: winner})
-		return
+		return sendJSON(ws, GameOverMsg{Type: "game_over", Result: result, Winner: winner})
 	}
 
 	// Eval AFTER user's move → opponent's best response + position quality.
-	afterResult := GetAnalysis(session.Eng, game, 15)
+	afterResult := GetAnalysis(session.Eng, game, 12)
 
 	// Eval drop from the user's perspective (eval is from White's POV).
 	evalDrop := beforeResult.Eval - afterResult.Eval
@@ -303,8 +313,7 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 	}
 	if !aiApplied {
 		log.Printf("AI move %q not found in valid moves for position %s", aiMoveStr, game.Position().String())
-		sendJSON(ws, WSErrorMsg{Type: "error", Message: "AI could not make a move — game state reset required"})
-		return
+		return sendJSON(ws, WSErrorMsg{Type: "error", Message: "AI could not make a move — game state reset required"})
 	}
 
 	// Detect opening name.
@@ -314,21 +323,20 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		openingName = op.Title()
 	}
 
-	// Quick eval for board_update.
-	quickEval := GetAnalysis(session.Eng, game, 8)
-	sendJSON(ws, BoardUpdateMsg{
+	if err := sendJSON(ws, BoardUpdateMsg{
 		Type:    "board_update",
 		FEN:     game.Position().String(),
 		AIMove:  aiMoveStr,
-		Eval:    quickEval.Eval,
+		Eval:    afterResult.Eval,
 		Opening: openingName,
-	})
+	}); err != nil {
+		return err
+	}
 
 	// Check game over after AI move.
 	if game.Outcome() != chess.NoOutcome {
 		result, winner := outcomeStrings(game.Outcome(), game.Method())
-		sendJSON(ws, GameOverMsg{Type: "game_over", Result: result, Winner: winner})
-		return
+		return sendJSON(ws, GameOverMsg{Type: "game_over", Result: result, Winner: winner})
 	}
 
 	// Build grounded situation report and stream coaching.
@@ -339,7 +347,7 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 	}
 	report := BuildSituationReport(beforeResult, facts, userMoveSAN, evalDrop, session.Personality, session.Level, openingName, preMovefen, afterResult.BestSAN, userColorStr)
 
-	// Send prompt to client for transparency.
+	// Send prompt to client for transparency (fire-and-forget).
 	sendJSON(ws, DebugPromptMsg{Type: "debug_prompt", Prompt: report})
 
 	streamCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -356,18 +364,20 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		}
 		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 			for _, part := range resp.Candidates[0].Content.Parts {
-				sendJSON(ws, CoachChunkMsg{
+				if err := sendJSON(ws, CoachChunkMsg{
 					Type:      "coach_chunk",
 					Text:      fmt.Sprintf("%v", part),
 					IsBlunder: isBlunder,
-				})
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	sendJSON(ws, CoachDoneMsg{Type: "coach_done"})
+	return sendJSON(ws, CoachDoneMsg{Type: "coach_done"})
 }
 
-func handleHint(ws *websocket.Conn, ctx context.Context, model *genai.GenerativeModel, session *GameSession) {
+func handleHint(ws *websocket.Conn, ctx context.Context, model *genai.GenerativeModel, session *GameSession) error {
 	result := GetAnalysis(session.Eng, session.Game, 12)
 
 	bestMove := result.BestSAN
@@ -400,7 +410,7 @@ func handleHint(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		}
 	}
 
-	sendJSON(ws, HintMsg{
+	return sendJSON(ws, HintMsg{
 		Type:   "hint",
 		Move:   result.BestMove,
 		Eval:   result.Eval,
