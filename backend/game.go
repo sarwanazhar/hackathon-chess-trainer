@@ -33,11 +33,12 @@ type GameSession struct {
 
 // --- Inbound JSON ---
 type ClientMsg struct {
-	Type  string `json:"type"`  // new_game | move | hint | set_personality | set_level
-	Move  string `json:"move"`  // UCI e.g. "e2e4"
-	Color string `json:"color"` // white | black
-	Mode  string `json:"mode"`  // roast | mentor
-	Level string `json:"level"` // beginner | intermediate | advanced
+	Type    string `json:"type"`    // new_game | move | hint | chat_message | set_personality | set_level
+	Move    string `json:"move"`    // UCI e.g. "e2e4"
+	Color   string `json:"color"`   // white | black
+	Mode    string `json:"mode"`    // roast | mentor
+	Level   string `json:"level"`   // beginner | intermediate | advanced
+	Content string `json:"content"` // chat message text
 }
 
 // --- Outbound JSON ---
@@ -61,6 +62,16 @@ type CoachChunkMsg struct {
 }
 
 type CoachDoneMsg struct {
+	Type string `json:"type"`
+}
+
+// Chat response types (separate from coaching so frontend can distinguish)
+type ChatChunkMsg struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type ChatDoneMsg struct {
 	Type string `json:"type"`
 }
 
@@ -97,7 +108,6 @@ func sendJSON(ws *websocket.Conn, v interface{}) error {
 
 // HandleGame is the WebSocket handler for /ws/game.
 func HandleGame(c *gin.Context, userID string) {
-	// Load .env only if running locally (PORT not set)
 	loadEnvIfLocal()
 
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -170,8 +180,12 @@ func HandleGame(c *gin.Context, userID string) {
 			if gameID, err := sb.SaveGame(GameRecord{UserID: userID, Color: msg.Color}); err == nil {
 				session.GameID = gameID
 			}
-			// Send initial board state (starting position).
-			sendJSON(ws, BoardUpdateMsg{Type: "board_update", FEN: session.Game.Position().String()})
+			// Send initial board state.
+			sendJSON(ws, BoardUpdateMsg{
+				Type: "board_update",
+				FEN:  session.Game.Position().String(),
+				Eval: 0,
+			})
 			// If user plays Black, AI (White) moves first.
 			if session.Color == chess.Black {
 				makeAIFirstMove(ws, session)
@@ -192,6 +206,12 @@ func HandleGame(c *gin.Context, userID string) {
 				continue
 			}
 			if err := handleHint(ws, ctx, model, session); err != nil {
+				return
+			}
+
+		case "chat_message":
+			// Handle free-form chat about the current position
+			if err := handleChat(ws, ctx, model, session, msg.Content); err != nil {
 				return
 			}
 
@@ -216,7 +236,6 @@ func HandleGame(c *gin.Context, userID string) {
 			"pgn":    session.Game.String(),
 			"result": result,
 		})
-		// Update Elo after a decisive result.
 		if result == "win" || result == "loss" || result == "draw" {
 			go sb.UpdateRating(session.UserID, result)
 		}
@@ -261,10 +280,9 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 	game := session.Game
 
 	// Eval BEFORE the user's move → what the user SHOULD have played.
-	preMovefen := game.Position().String()
 	beforeResult := GetAnalysis(session.Eng, game, 12)
 
-	// Validate move.
+	// Validate and apply user's move.
 	var userMove *chess.Move
 	for _, m := range game.ValidMoves() {
 		if m.String() == moveStr {
@@ -273,7 +291,13 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		}
 	}
 	if userMove == nil {
-		return sendJSON(ws, WSErrorMsg{Type: "error", Message: "Invalid move"})
+		// Send error AND re-send current board state so frontend can resync.
+		sendJSON(ws, WSErrorMsg{Type: "error", Message: "Invalid move: " + moveStr})
+		return sendJSON(ws, BoardUpdateMsg{
+			Type: "board_update",
+			FEN:  game.Position().String(),
+			Eval: beforeResult.Eval,
+		})
 	}
 
 	userMoveSAN := chess.AlgebraicNotation{}.Encode(game.Position(), userMove)
@@ -286,10 +310,10 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		return sendJSON(ws, GameOverMsg{Type: "game_over", Result: result, Winner: winner})
 	}
 
-	// Eval AFTER user's move → opponent's best response + position quality.
+	// Eval AFTER user's move.
 	afterResult := GetAnalysis(session.Eng, game, 12)
 
-	// Eval drop from the user's perspective (eval is from White's POV).
+	// Eval drop (from user's perspective; Stockfish eval is from White's POV).
 	evalDrop := beforeResult.Eval - afterResult.Eval
 	if session.Color == chess.Black {
 		evalDrop = afterResult.Eval - beforeResult.Eval
@@ -333,6 +357,7 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		openingName = op.Title()
 	}
 
+	// ── Send board update FIRST so the frontend can immediately render the AI move ──
 	if err := sendJSON(ws, BoardUpdateMsg{
 		Type:    "board_update",
 		FEN:     game.Position().String(),
@@ -349,15 +374,68 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		return sendJSON(ws, GameOverMsg{Type: "game_over", Result: result, Winner: winner})
 	}
 
-	// Build grounded situation report and stream coaching.
-	facts := AnalyzeBoard(game.Position())
+	// ── Stream coaching AFTER board is already updated ──
 	userColorStr := "white"
 	if session.Color == chess.Black {
 		userColorStr = "black"
 	}
-	report := BuildSituationReport(beforeResult, facts, userMoveSAN, evalDrop, session.Personality, session.Level, openingName, preMovefen, afterResult.BestSAN, userColorStr)
 
-	// Send prompt to client for transparency (fire-and-forget).
+	// Classify the move quality based on eval drop.
+	moveQuality := "good"
+	switch {
+	case evalDrop > 3.0:
+		moveQuality = "blunder"
+	case evalDrop > 1.5:
+		moveQuality = "mistake"
+	case evalDrop > 0.5:
+		moveQuality = "inaccuracy"
+	}
+
+	// Build a fully-grounded prompt — no room for hallucination.
+	// All chess facts come directly from Stockfish; the LLM only provides the words.
+	bestMoveSAN := afterResult.BestSAN
+	if bestMoveSAN == "" {
+		bestMoveSAN = afterResult.BestMove
+	}
+	bestMoveBefore := beforeResult.BestSAN
+	if bestMoveBefore == "" {
+		bestMoveBefore = beforeResult.BestMove
+	}
+
+	toneInstruction := "Be direct and encouraging."
+	if session.Personality == "roast" {
+		toneInstruction = "Be witty and slightly sarcastic, but keep it short."
+	}
+
+	openingNote := ""
+	if openingName != "" {
+		openingNote = fmt.Sprintf(" Opening: %s.", openingName)
+	}
+
+	report := fmt.Sprintf(
+		`You are a chess coach giving real-time feedback. Reply in AT MOST 2 SHORT sentences. No lists, no markdown, no intro phrases like "Great move!" — just the key insight.
+
+FACTS (do not contradict these):
+- Player is %s
+- Player played: %s
+- Move quality: %s (eval drop: %.2f pawns)
+- Stockfish best move was: %s (eval before: %+.2f)
+- Stockfish response (AI played): %s (eval after: %+.2f)
+- Best continuation line: %s%s
+
+%s
+In 1-2 sentences, tell the player what happened and what they should know going forward.`,
+		userColorStr,
+		userMoveSAN,
+		moveQuality, evalDrop,
+		bestMoveBefore, beforeResult.Eval,
+		bestMoveSAN, afterResult.Eval,
+		strings.Join(afterResult.PVLine, " "),
+		openingNote,
+		toneInstruction,
+	)
+
+	// Send prompt for transparency.
 	sendJSON(ws, DebugPromptMsg{Type: "debug_prompt", Prompt: report})
 
 	streamCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -370,6 +448,7 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 			break
 		}
 		if err != nil {
+			log.Printf("stream error: %v", err)
 			break
 		}
 		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
@@ -385,6 +464,85 @@ func handleMove(ws *websocket.Conn, ctx context.Context, model *genai.Generative
 		}
 	}
 	return sendJSON(ws, CoachDoneMsg{Type: "coach_done"})
+}
+
+// handleChat responds to free-form user questions about the current position.
+// It pulls live Stockfish analysis so the LLM has real facts and cannot hallucinate moves or evals.
+func handleChat(ws *websocket.Conn, ctx context.Context, model *genai.GenerativeModel, session *GameSession, userMessage string) error {
+	if userMessage == "" {
+		return nil
+	}
+
+	// Pull live Stockfish data — gives the LLM real, current facts to work from.
+	positionContext := ""
+	if session.Game != nil {
+		analysis := GetAnalysis(session.Eng, session.Game, 12)
+		bestMoveSAN := analysis.BestSAN
+		if bestMoveSAN == "" {
+			bestMoveSAN = analysis.BestMove
+		}
+		playerColor := "white"
+		if session.Color == chess.Black {
+			playerColor = "black"
+		}
+		positionContext = fmt.Sprintf(
+			"POSITION FACTS (Stockfish — do not contradict or invent anything):\n"+
+				"- FEN: %s\n"+
+				"- Player is: %s, move %d\n"+
+				"- Eval: %+.2f (positive = white better)\n"+
+				"- Best move right now: %s\n"+
+				"- Best continuation: %s\n"+
+				"- Full move history (UCI): %s\n\n",
+			session.Game.Position().String(),
+			playerColor,
+			len(session.Moves)/2+1,
+			analysis.Eval,
+			bestMoveSAN,
+			strings.Join(analysis.PVLine, " "),
+			strings.Join(session.Moves, " "),
+		)
+	}
+
+	toneInstruction := "Be direct and helpful."
+	if session.Personality == "roast" {
+		toneInstruction = "Be witty and slightly sarcastic, but accurate."
+	}
+
+	prompt := fmt.Sprintf(
+		"You are a chess coach. Reply in AT MOST 2 SHORT sentences. No markdown, no lists, no preamble, no filler phrases.\n\n"+
+			"%s"+
+			"Player asks: \"%s\"\n\n"+
+			"%s Only answer what was asked. Use only the facts above.",
+		positionContext,
+		userMessage,
+		toneInstruction,
+	)
+
+	streamCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	iter := model.GenerateContentStream(streamCtx, genai.Text(prompt))
+	for {
+		resp, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("chat stream error: %v", err)
+			break
+		}
+		if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+			for _, part := range resp.Candidates[0].Content.Parts {
+				if err := sendJSON(ws, ChatChunkMsg{
+					Type: "chat_response",
+					Text: fmt.Sprintf("%v", part),
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return sendJSON(ws, ChatDoneMsg{Type: "chat_done"})
 }
 
 func handleHint(ws *websocket.Conn, ctx context.Context, model *genai.GenerativeModel, session *GameSession) error {
