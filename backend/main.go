@@ -34,7 +34,7 @@ func main() {
 	// Get port from environment or default to 8080
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8989"
 	}
 
 	clerk.SetKey(os.Getenv("CLERK_SECRET_KEY"))
