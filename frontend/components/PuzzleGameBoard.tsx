@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useCallback } from 'react';
 import { Chessground } from 'chessground';
+import type { Key } from 'chessground/types';
 import { Chess } from 'chess.js';
 
 import 'chessground/assets/chessground.base.css';
@@ -18,11 +19,11 @@ interface GameBoardProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getDests(chess: Chess) {
-  const dests = new Map<string, string[]>();
+function getDests(chess: Chess): Map<Key, Key[]> {
+  const dests = new Map<Key, Key[]>();
   chess.moves({ verbose: true }).forEach(m => {
-    if (!dests.has(m.from)) dests.set(m.from, []);
-    dests.get(m.from)!.push(m.to);
+    if (!dests.has(m.from as Key)) dests.set(m.from as Key, []);
+    dests.get(m.from as Key)!.push(m.to as Key);
   });
   return dests;
 }
