@@ -97,9 +97,6 @@ func sendJSON(ws *websocket.Conn, v interface{}) error {
 
 // HandleGame is the WebSocket handler for /ws/game.
 func HandleGame(c *gin.Context, userID string) {
-	// Load .env only if running locally (PORT not set)
-	loadEnvIfLocal()
-
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println("WebSocket upgrade error:", err)
