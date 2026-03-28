@@ -27,7 +27,7 @@ type GameSession struct {
 	GameID      string
 	Color       chess.Color
 	Personality string
-	Level       string // beginner | intermediate | advanced
+	Level       string   // beginner | intermediate | advanced
 	Moves       []string // UCI move history
 }
 
@@ -97,6 +97,9 @@ func sendJSON(ws *websocket.Conn, v interface{}) error {
 
 // HandleGame is the WebSocket handler for /ws/game.
 func HandleGame(c *gin.Context, userID string) {
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
+
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println("WebSocket upgrade error:", err)
@@ -117,7 +120,6 @@ func HandleGame(c *gin.Context, userID string) {
 		return
 	}
 	defer aiClient.Close()
-
 	model := aiClient.GenerativeModel("gemma-3-27b-it")
 	model.SetTemperature(0.1)
 
@@ -168,7 +170,7 @@ func HandleGame(c *gin.Context, userID string) {
 			if gameID, err := sb.SaveGame(GameRecord{UserID: userID, Color: msg.Color}); err == nil {
 				session.GameID = gameID
 			}
-		// Send initial board state (starting position).
+			// Send initial board state (starting position).
 			sendJSON(ws, BoardUpdateMsg{Type: "board_update", FEN: session.Game.Position().String()})
 			// If user plays Black, AI (White) moves first.
 			if session.Color == chess.Black {
@@ -181,8 +183,8 @@ func HandleGame(c *gin.Context, userID string) {
 				continue
 			}
 			if err := handleMove(ws, ctx, model, session, msg.Move); err != nil {
-			return
-		}
+				return
+			}
 
 		case "hint":
 			if session.Game == nil {
@@ -190,8 +192,8 @@ func HandleGame(c *gin.Context, userID string) {
 				continue
 			}
 			if err := handleHint(ws, ctx, model, session); err != nil {
-			return
-		}
+				return
+			}
 
 		case "set_personality":
 			session.Personality = msg.Mode

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/notnil/chess"
 )
 
@@ -180,9 +179,10 @@ func convertUCISolutionToSAN(fenStr string, uciMoves []string) ([]string, error)
 //
 // Safe to re-run — skips if 100+ Lichess puzzles already exist.
 func TestSeedLichessPuzzles(t *testing.T) {
-	godotenv.Load(".env")
-	sbClient := NewSupabaseClient()
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
 
+	sbClient := NewSupabaseClient()
 	// Skip if already seeded.
 	existing, err := sbClient.dbRequest("GET", "puzzles", nil, "source=eq.lichess&select=id")
 	if err != nil {

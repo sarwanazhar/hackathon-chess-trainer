@@ -4,17 +4,16 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/joho/godotenv"
 )
 
 // TestSeedPuzzles inserts the general puzzle pool (user_id=NULL).
 // Run once: go test -v -run TestSeedPuzzles
 // Safe to re-run — skips if pool already has 10+ puzzles.
 func TestSeedPuzzles(t *testing.T) {
-	godotenv.Load(".env")
-	sb := NewSupabaseClient()
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
 
+	sb := NewSupabaseClient()
 	// Check existing count
 	data, err := sb.dbRequest("GET", "puzzles", nil, "user_id=is.null&select=id")
 	if err != nil {

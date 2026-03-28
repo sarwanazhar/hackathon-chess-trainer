@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 // chessTopics is the canonical list of topics pre-seeded into the videos table.
@@ -45,9 +43,10 @@ var chessTopics = []string{
 //
 // Safe to re-run — skips topics that already have 3+ cached videos.
 func TestSeedVideos(t *testing.T) {
-	godotenv.Load(".env")
-	sbClient := NewSupabaseClient()
+	// Load .env only if running locally (PORT not set)
+	loadEnvIfLocal()
 
+	sbClient := NewSupabaseClient()
 	inserted := 0
 	skipped := 0
 	failed := 0
