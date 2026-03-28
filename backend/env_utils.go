@@ -2,19 +2,16 @@ package main
 
 import (
 	"log"
-	"os"
 
 	"github.com/joho/godotenv"
 )
 
-// loadEnvIfLocal loads .env only if running locally (PORT not set)
+// loadEnvIfLocal loads .env if present — does NOT override existing system env vars.
 func loadEnvIfLocal() {
-	if os.Getenv("PORT") == "8989" {
-		err := godotenv.Load()
-		if err != nil {
-			log.Println("⚠️  No .env file found, continuing...")
-		} else {
-			log.Println("✅ .env loaded")
-		}
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("⚠️  No .env file found, continuing with system env...")
+	} else {
+		log.Println("✅ .env loaded")
 	}
 }

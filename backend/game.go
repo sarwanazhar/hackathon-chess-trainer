@@ -125,7 +125,7 @@ func HandleGame(c *gin.Context, userID string) {
 
 	stockfishPath := os.Getenv("STOCKFISH_PATH")
 	if stockfishPath == "" {
-		stockfishPath = "./stockfish/stockfish-windows-x86-64-avx2.exe"
+		stockfishPath = "stockfish"
 	}
 	eng, err := uci.New(stockfishPath)
 	if err != nil {

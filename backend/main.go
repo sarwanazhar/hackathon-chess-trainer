@@ -43,7 +43,7 @@ func main() {
 	// Initialize shared Stockfish engine for puzzle coaching.
 	sfPath := os.Getenv("STOCKFISH_PATH")
 	if sfPath == "" {
-		sfPath = "./stockfish/stockfish-windows-x86-64-avx2.exe"
+		sfPath = "stockfish"
 	}
 	if eng, err := uci.New(sfPath); err == nil {
 		eng.Run(uci.CmdUCI, uci.CmdIsReady)
